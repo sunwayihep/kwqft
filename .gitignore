@@ -1,0 +1,41 @@
+# Build directories
+build*/
+cmake-build*/
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+
+# Executables
+heatbath
+test_kwqft
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Kokkos source (downloaded externally)
+kokkos/
+kokkos_*/
+kokkos-kernels/
+
+# Output files
+*.dat
+*.bin
+*.log
+*.out
+
+
