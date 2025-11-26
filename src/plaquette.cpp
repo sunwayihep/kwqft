@@ -12,4 +12,3 @@ template class Plaquette<float>;
 template class Plaquette<double>;
 
 } // namespace kwqft
-

@@ -12,4 +12,3 @@ template class Reunitarize<float>;
 template class Reunitarize<double>;
 
 } // namespace kwqft
-

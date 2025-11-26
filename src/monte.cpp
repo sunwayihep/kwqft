@@ -14,4 +14,3 @@ template class Overrelaxation<float>;
 template class Overrelaxation<double>;
 
 } // namespace kwqft
-

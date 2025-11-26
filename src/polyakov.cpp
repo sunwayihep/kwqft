@@ -12,4 +12,3 @@ template class PolyakovLoop<float>;
 template class PolyakovLoop<double>;
 
 } // namespace kwqft
-

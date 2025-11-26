@@ -12,4 +12,3 @@ template class GaugeArray<float>;
 template class GaugeArray<double>;
 
 } // namespace kwqft
-

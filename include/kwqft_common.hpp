@@ -1,9 +1,9 @@
 /**
  * @file kwqft_common.hpp
  * @brief Common definitions and utilities for KWQFT
- * 
+ *
  * KWQFT - Kokkos-based Ken Wilson Quantum Field Theory on lattice
- * 
+ *
  * This file provides portable definitions that work across
  * different Kokkos backends (CUDA, HIP, OpenMP, Serial, SYCL)
  */
@@ -76,33 +76,30 @@ using team_policy = Kokkos::TeamPolicy<DefaultExecSpace>;
 using team_member = typename team_policy::member_type;
 
 // MDRange policy for multi-dimensional parallel loops
-template<int Rank>
-using md_range_policy = Kokkos::MDRangePolicy<DefaultExecSpace, Kokkos::Rank<Rank>>;
+template <int Rank>
+using md_range_policy =
+    Kokkos::MDRangePolicy<DefaultExecSpace, Kokkos::Rank<Rank>>;
 
 //=============================================================================
 // View type aliases
 //=============================================================================
 
 // 1D Views
-template<typename T>
-using View1D = Kokkos::View<T*, DefaultMemSpace>;
+template <typename T> using View1D = Kokkos::View<T *, DefaultMemSpace>;
 
-template<typename T>
-using HostView1D = Kokkos::View<T*, HostMemSpace>;
+template <typename T> using HostView1D = Kokkos::View<T *, HostMemSpace>;
 
-template<typename T>
-using MirrorView1D = typename View1D<T>::HostMirror;
+template <typename T> using MirrorView1D = typename View1D<T>::HostMirror;
 
 // 2D Views
-template<typename T>
-using View2D = Kokkos::View<T**, DefaultMemSpace>;
+template <typename T> using View2D = Kokkos::View<T **, DefaultMemSpace>;
 
-template<typename T>
-using HostView2D = Kokkos::View<T**, HostMemSpace>;
+template <typename T> using HostView2D = Kokkos::View<T **, HostMemSpace>;
 
 // Unmanaged views (for wrapping existing data)
-template<typename T>
-using UnmanagedView1D = Kokkos::View<T*, DefaultMemSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+template <typename T>
+using UnmanagedView1D =
+    Kokkos::View<T *, DefaultMemSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
 
 //=============================================================================
 // Random number generator types
@@ -116,10 +113,8 @@ using RNGState = typename RNGPool::generator_type;
 // Atomic operations
 //=============================================================================
 
-template<typename T>
-KOKKOS_INLINE_FUNCTION
-void atomicAdd(T* ptr, T val) {
-    Kokkos::atomic_add(ptr, val);
+template <typename T> KOKKOS_INLINE_FUNCTION void atomicAdd(T *ptr, T val) {
+  Kokkos::atomic_add(ptr, val);
 }
 
 //=============================================================================
@@ -127,20 +122,14 @@ void atomicAdd(T* ptr, T val) {
 //=============================================================================
 
 KOKKOS_INLINE_FUNCTION
-constexpr int mod(int x, int y) {
-    return ((x % y) + y) % y;
+constexpr int mod(int x, int y) { return ((x % y) + y) % y; }
+
+template <typename T> KOKKOS_INLINE_FUNCTION constexpr T pow2(T x) {
+  return x * x;
 }
 
-template<typename T>
-KOKKOS_INLINE_FUNCTION
-constexpr T pow2(T x) {
-    return x * x;
-}
-
-template<typename T>
-KOKKOS_INLINE_FUNCTION
-T absVal(T x) {
-    return (x >= 0) ? x : -x;
+template <typename T> KOKKOS_INLINE_FUNCTION T absVal(T x) {
+  return (x >= 0) ? x : -x;
 }
 
 //=============================================================================
@@ -153,9 +142,9 @@ constexpr size_t KWQFT_ALIGNMENT = 64;
 // Error handling
 //=============================================================================
 
-inline void checkError(const char* msg) {
-    Kokkos::fence();  // Ensure all work is complete
-    // Additional error checking can be added here
+inline void checkError(const char *msg) {
+  Kokkos::fence(); // Ensure all work is complete
+                   // Additional error checking can be added here
 }
 
 //=============================================================================
@@ -165,28 +154,32 @@ inline void checkError(const char* msg) {
 #ifdef KWQFT_VERBOSE
 #define KWQFT_PRINT(...) printf(__VA_ARGS__)
 #else
-#define KWQFT_PRINT(...) do {} while(0)
+#define KWQFT_PRINT(...)                                                       \
+  do {                                                                         \
+  } while (0)
 #endif
 
 // Error message macro
-#define KWQFT_ERROR(msg) do { \
-    fprintf(stderr, "KWQFT Error: %s at %s:%d\n", msg, __FILE__, __LINE__); \
-    Kokkos::abort(msg); \
-} while(0)
+#define KWQFT_ERROR(msg)                                                       \
+  do {                                                                         \
+    fprintf(stderr, "KWQFT Error: %s at %s:%d\n", msg, __FILE__, __LINE__);    \
+    Kokkos::abort(msg);                                                        \
+  } while (0)
 
-// Warning message macro  
-#define KWQFT_WARNING(msg) do { \
-    fprintf(stderr, "KWQFT Warning: %s\n", msg); \
-} while(0)
+// Warning message macro
+#define KWQFT_WARNING(msg)                                                     \
+  do {                                                                         \
+    fprintf(stderr, "KWQFT Warning: %s\n", msg);                               \
+  } while (0)
 
 //=============================================================================
 // Array type enumeration (for data layout)
 //=============================================================================
 
 enum class ArrayType {
-    SOA,      // Structure of Arrays - full storage
-    SOA12,    // 12 parameter storage for SU(3)
-    SOA8      // 8 parameter storage for SU(3)
+  SOA,   // Structure of Arrays - full storage
+  SOA12, // 12 parameter storage for SU(3)
+  SOA8   // 8 parameter storage for SU(3)
 };
 
 //=============================================================================
@@ -194,11 +187,10 @@ enum class ArrayType {
 //=============================================================================
 
 enum class MemoryLocation {
-    Device,   // GPU or accelerator memory
-    Host      // CPU memory
+  Device, // GPU or accelerator memory
+  Host    // CPU memory
 };
 
 } // namespace kwqft
 
 #endif // KWQFT_COMMON_HPP
-

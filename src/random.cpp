@@ -10,4 +10,3 @@ namespace kwqft {
 // No additional implementation needed - all functionality is in header
 
 } // namespace kwqft
-
