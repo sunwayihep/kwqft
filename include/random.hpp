@@ -152,7 +152,7 @@ KOKKOS_INLINE_FUNCTION Msu2<Real> generateSu2Matrix_milc(Real al,
   xr2 = Kokkos::log(xr2 + Real(1e-10));
   xr3 = gen.drand();
   xr4 = gen.drand();
-  xr3 = Kokkos::cos(PI * xr3);
+  xr3 = Kokkos::cos(PII * xr3);
   d = -(xr2 + xr1 * xr3 * xr3) / al;
 
   int nacd = 0;
@@ -171,7 +171,7 @@ KOKKOS_INLINE_FUNCTION Msu2<Real> generateSu2Matrix_milc(Real al,
       xr2 = Kokkos::log(xr2 + Real(1e-10));
       xr3 = gen.drand();
       xr4 = gen.drand();
-      xr3 = Kokkos::cos(PI * xr3);
+      xr3 = Kokkos::cos(PII * xr3);
       d = -(xr2 + xr1 * xr3 * xr3) / al;
       if ((Real(1) - Real(0.5) * d) > xr4 * xr4)
         break;
@@ -205,7 +205,7 @@ KOKKOS_INLINE_FUNCTION Msu2<Real> generateSu2Matrix_milc(Real al,
   if (xr1 < Real(0))
     xr1 = Real(0);
   xr1 = Kokkos::sqrt(xr1);
-  xr2 = PI * gen.drand();
+  xr2 = PII * gen.drand();
   a.a1() = xr1 * Kokkos::cos(xr2);
   a.a2() = xr1 * Kokkos::sin(xr2);
 
