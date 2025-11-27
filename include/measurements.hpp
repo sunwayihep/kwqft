@@ -48,29 +48,28 @@ private:
    * @brief Helper function to load a gauge link from even-odd storage
    */
   KOKKOS_INLINE_FUNCTION
-  static void loadLink(MatrixT &U, const ComplexT *gauge_ptr, int idx, int mu,
-                       int volume, int size) {
-    int muvolume = mu * volume;
+  static void loadLink(MatrixT &U, const ComplexT *gaugePtr, int64_t idx,
+                       int mu, int64_t volume, int64_t size) {
+    int64_t muvolume = mu * volume;
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
-        U.e[i][j] = gauge_ptr[idx + muvolume + (j + i * NCOLORS) * size];
+        U.e[i][j] = gaugePtr[idx + muvolume + (j + i * NCOLORS) * size];
       }
     }
   }
 
   /**
    * @brief Get neighbor index in even-odd ordering (simplified for single GPU)
-   *
    */
   KOKKOS_INLINE_FUNCTION
-  static int getNeighborEo(int id, int oddbit, int mu, int lmu,
-                           const LatticeParams &p) {
+  static int64_t getNeighborEo(int64_t id, int oddbit, int mu, int lmu,
+                               const LatticeParams &p) {
     // Convert even-odd index to coordinates using indexNdEo logic
     int x[NDIMS];
-    int factor = id / (p.grid[0] / 2);
+    int64_t factor = id / (p.grid[0] / 2);
     for (int i = 1; i < NDIMS; ++i) {
-      int factor1 = factor / p.grid[i];
-      x[i] = factor - factor1 * p.grid[i];
+      int64_t factor1 = factor / p.grid[i];
+      x[i] = static_cast<int>(factor - factor1 * p.grid[i]);
       factor = factor1;
     }
     int sum = 0;
@@ -78,14 +77,13 @@ private:
       sum += x[i];
     }
     int xodd = (sum + oddbit) & 1;
-    x[0] = (id * 2 + xodd) - id / (p.grid[0] / 2) * p.grid[0];
+    x[0] = static_cast<int>((id * 2 + xodd) - id / (p.grid[0] / 2) * p.grid[0]);
 
     // Move to neighbor
     x[mu] = (x[mu] + lmu + p.grid[mu]) % p.grid[mu];
 
     // Convert coordinates to normal linear index, then to EO index
-    // pos = indexNdNm(x) / 2
-    int pos = 0;
+    int64_t pos = 0;
     factor = 1;
     for (int i = 0; i < NDIMS; ++i) {
       pos += x[i] * factor;
@@ -94,11 +92,11 @@ private:
     pos /= 2; // Convert to half-volume index
 
     // Determine parity of neighbor and add offset for odd sites
-    int sum_x = 0;
+    int sumX = 0;
     for (int i = 0; i < NDIMS; ++i) {
-      sum_x += x[i];
+      sumX += x[i];
     }
-    int oddbit1 = sum_x & 1;
+    int oddbit1 = sumX & 1;
     pos += oddbit1 * p.half_volume;
 
     return pos;
@@ -117,9 +115,9 @@ public:
 
     auto gaugeView = gauge_.getView();
     auto params = params_;
-    int size = gauge_.size();
-    int volume = params.volume;
-    int halfVol = params.half_volume;
+    int64_t size = gauge_.size();
+    int64_t volume = params.volume;
+    int64_t halfVol = params.half_volume;
 
     Real plaqSum = 0;
     Real spatialSum = 0;
@@ -127,20 +125,20 @@ public:
 
     // Parallel reduction over all sites (even + odd)
     Kokkos::parallel_reduce(
-        "Plaquette", range_policy(0, volume),
-        KOKKOS_LAMBDA(const int idd, Real &lsum, Real &ssum, Real &tsum) {
+        "Plaquette", Kokkos::RangePolicy<DefaultExecSpace>(0, volume),
+        KOKKOS_LAMBDA(const int64_t idd, Real &lsum, Real &ssum, Real &tsum) {
           ComplexT *gaugePtr = gaugeView.data();
 
           // Determine parity and half-volume index
           int oddbit = 0;
-          int id = idd;
+          int64_t id = idd;
           if (idd >= halfVol) {
             oddbit = 1;
             id = idd - halfVol;
           }
 
           // Current site index in even-odd storage
-          int idxoddbit = id + oddbit * halfVol;
+          int64_t idxoddbit = id + oddbit * halfVol;
 
           // Calculate plaquettes for all mu < nu directions
           MatrixT link1, link;
@@ -150,7 +148,7 @@ public:
             loadLink(link1, gaugePtr, idxoddbit, mu, volume, size);
 
             // Get neighbor index x + mu
-            int newidmu1 = getNeighborEo(id, oddbit, mu, 1, params);
+            int64_t newidmu1 = getNeighborEo(id, oddbit, mu, 1, params);
 
             for (int nu = mu + 1; nu < NDIMS; ++nu) {
               // Load U_nu(x+mu)
@@ -158,7 +156,7 @@ public:
               loadLink(uNuXmu, gaugePtr, newidmu1, nu, volume, size);
 
               // Load U_mu(x+nu) - dagger
-              int newidnu1 = getNeighborEo(id, oddbit, nu, 1, params);
+              int64_t newidnu1 = getNeighborEo(id, oddbit, nu, 1, params);
               MatrixT uMuXnu;
               loadLink(uMuXnu, gaugePtr, newidnu1, mu, volume, size);
 
@@ -269,33 +267,34 @@ public:
 
     auto gaugeView = gauge_.getView();
     auto params = params_;
-    int size = gauge_.size();
+    int64_t size = gauge_.size();
 
     // Calculate spatial volume
-    int spatialVolume = 1;
+    int64_t spatialVolume = 1;
     for (int i = 0; i < NDIMS - 1; ++i) {
       spatialVolume *= params.grid[i];
     }
 
     int nt = params.grid[NDIMS - 1];
-    int volume = params.volume;
+    int64_t volume = params.volume;
     int tDir = NDIMS - 1;
-    int tVolume = tDir * volume;
+    int64_t tVolume = tDir * volume;
 
     Real polyRe = 0;
     Real polyIm = 0;
 
     // Parallel reduction over spatial sites
     Kokkos::parallel_reduce(
-        "PolyakovLoop", range_policy(0, spatialVolume),
-        KOKKOS_LAMBDA(const int spatialIdx, Real &reSum, Real &imSum) {
+        "PolyakovLoop",
+        Kokkos::RangePolicy<DefaultExecSpace>(0, spatialVolume),
+        KOKKOS_LAMBDA(const int64_t spatialIdx, Real &reSum, Real &imSum) {
           ComplexT *gaugePtr = gaugeView.data();
 
           // Convert spatial index to coordinates
           int x[NDIMS];
-          int temp = spatialIdx;
+          int64_t temp = spatialIdx;
           for (int i = 0; i < NDIMS - 1; ++i) {
-            x[i] = temp % params.grid[i];
+            x[i] = static_cast<int>(temp % params.grid[i]);
             temp /= params.grid[i];
           }
           x[NDIMS - 1] = 0; // Start at t=0
@@ -305,7 +304,7 @@ public:
 
           for (int t = 0; t < nt; ++t) {
             x[NDIMS - 1] = t;
-            int idx = indexNdNm<NDIMS>(x, params);
+            int64_t idx = indexNdNm<NDIMS>(x, params);
 
             // Load temporal link
             MatrixT uT;
@@ -487,12 +486,12 @@ public:
     Kokkos::Timer timer;
 
     auto gaugeView = gauge_.getView();
-    int size = gauge_.size();      // volume * NDIMS
-    int totalLinks = params_.size; // volume * NDIMS
+    int64_t size = gauge_.size();      // volume * NDIMS
+    int64_t totalLinks = params_.size; // volume * NDIMS
 
     Kokkos::parallel_for(
-        "Reunitarize", range_policy(0, totalLinks),
-        KOKKOS_LAMBDA(const int linkIdx) {
+        "Reunitarize", Kokkos::RangePolicy<DefaultExecSpace>(0, totalLinks),
+        KOKKOS_LAMBDA(const int64_t linkIdx) {
           ComplexT *gaugePtr = gaugeView.data();
 
           // Load matrix from SOA format

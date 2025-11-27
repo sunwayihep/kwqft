@@ -17,18 +17,21 @@ namespace kwqft {
 /**
  * @brief Structure to hold lattice parameters
  * This is designed to be copyable to device
+ * Uses int64_t for volume-related fields to support large lattices
  */
 struct LatticeParams {
-  int grid[NDIMS];            // Lattice dimensions
+  int grid[NDIMS];            // Lattice dimensions (per-dimension, int is enough)
   int grid_with_ghost[NDIMS]; // Lattice dimensions including ghost zones
   int border[NDIMS];          // Border size for multi-GPU
-  int volume;                 // Total volume
-  int half_volume;            // Half volume (for even/odd)
-  int volume_with_ghost;      // Volume including ghost zones
-  int half_volume_with_ghost;
-  int size;    // Total number of links = volume * NDIMS
-  int kstride; // Stride for k = nx * ny
-  int tstride; // Stride for t = nx * ny * nz
+
+  // Volume-related fields use int64_t to support high-dimensional lattices
+  int64_t volume;                 // Total volume
+  int64_t half_volume;            // Half volume (for even/odd)
+  int64_t volume_with_ghost;      // Volume including ghost zones
+  int64_t half_volume_with_ghost;
+  int64_t size;    // Total number of links = volume * NDIMS
+  int64_t kstride; // Stride for k = nx * ny
+  int64_t tstride; // Stride for t = nx * ny * nz (or product of first NDIMS-1 dims)
 
   double beta;         // Gauge coupling
   double beta_over_nc; // beta / Nc
@@ -50,7 +53,7 @@ struct LatticeParams {
 
   // Initialize from lattice dimensions and beta
   void initialize(const std::vector<int> &lattice_size, double _beta) {
-    if (lattice_size.size() != NDIMS) {
+    if (static_cast<int>(lattice_size.size()) != NDIMS) {
       KWQFT_ERROR("Lattice size vector must have NDIMS elements");
     }
 
@@ -59,7 +62,7 @@ struct LatticeParams {
       grid[i] = lattice_size[i];
       grid_with_ghost[i] = lattice_size[i];
       border[i] = 0;
-      volume *= grid[i];
+      volume *= static_cast<int64_t>(grid[i]);
     }
 
     half_volume = volume / 2;
@@ -67,8 +70,12 @@ struct LatticeParams {
     half_volume_with_ghost = half_volume;
     size = volume * NDIMS;
 
-    kstride = grid[0] * grid[1];
-    tstride = kstride * grid[2];
+    // Compute strides for spatial volume
+    kstride = static_cast<int64_t>(grid[0]) * grid[1];
+    tstride = 1;
+    for (int i = 0; i < NDIMS - 1; ++i) {
+      tstride *= static_cast<int64_t>(grid[i]);
+    }
 
     beta = _beta;
     beta_over_nc = beta / static_cast<double>(NCOLORS);
@@ -142,21 +149,21 @@ int param_GridG(const LatticeParams &p, int dim) {
 }
 
 KOKKOS_INLINE_FUNCTION
-int param_Volume(const LatticeParams &p) { return p.volume; }
+int64_t param_Volume(const LatticeParams &p) { return p.volume; }
 
 KOKKOS_INLINE_FUNCTION
-int param_HalfVolume(const LatticeParams &p) { return p.half_volume; }
+int64_t param_HalfVolume(const LatticeParams &p) { return p.half_volume; }
 
 KOKKOS_INLINE_FUNCTION
-int param_VolumeG(const LatticeParams &p) { return p.volume_with_ghost; }
+int64_t param_VolumeG(const LatticeParams &p) { return p.volume_with_ghost; }
 
 KOKKOS_INLINE_FUNCTION
-int param_HalfVolumeG(const LatticeParams &p) {
+int64_t param_HalfVolumeG(const LatticeParams &p) {
   return p.half_volume_with_ghost;
 }
 
 KOKKOS_INLINE_FUNCTION
-int param_Size(const LatticeParams &p) { return p.size; }
+int64_t param_Size(const LatticeParams &p) { return p.size; }
 
 KOKKOS_INLINE_FUNCTION
 double param_Beta(const LatticeParams &p) { return p.beta; }

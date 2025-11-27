@@ -38,7 +38,7 @@ private:
   ArrayType arrayType_;     // Storage format
   MemoryLocation location_; // Where primary data resides
   bool evenOdd_;            // Even/odd ordering
-  int size_;                // Number of links
+  int64_t size_;            // Number of links (int64_t for large lattices)
   bool allocated_;          // Whether memory is allocated
 
 public:
@@ -48,11 +48,11 @@ public:
         evenOdd_(false), size_(0), allocated_(false) {}
 
   // Constructor with parameters
-  GaugeArray(ArrayType type, MemoryLocation loc, int size_in,
-             bool even_odd = false)
-      : arrayType_(type), location_(loc), evenOdd_(even_odd), size_(size_in),
+  GaugeArray(ArrayType type, MemoryLocation loc, int64_t sizeIn,
+             bool evenOdd = false)
+      : arrayType_(type), location_(loc), evenOdd_(evenOdd), size_(sizeIn),
         allocated_(false) {
-    allocate(size_in);
+    allocate(sizeIn);
   }
 
   // Destructor - Kokkos views handle cleanup automatically
@@ -82,7 +82,7 @@ public:
   bool even_odd() const { return evenOdd_; }
 
   KOKKOS_INLINE_FUNCTION
-  int size() const { return size_; }
+  int64_t size() const { return size_; }
 
   KOKKOS_INLINE_FUNCTION
   bool allocated() const { return allocated_; }
@@ -137,17 +137,17 @@ public:
   /**
    * @brief Allocate memory
    */
-  void allocate(int size_in) {
+  void allocate(int64_t sizeIn) {
     if (allocated_) {
       KWQFT_WARNING("Array already allocated");
       return;
     }
 
-    size_ = size_in;
-    size_t total_elems = static_cast<size_t>(size_) * getNumElems();
+    size_ = sizeIn;
+    size_t totalElems = static_cast<size_t>(size_) * getNumElems();
 
     // Allocate device view
-    data_ = ViewT("gauge_data", total_elems);
+    data_ = ViewT("gauge_data", totalElems);
 
     // Create host mirror
     hostData_ = Kokkos::create_mirror_view(data_);

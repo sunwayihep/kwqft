@@ -32,28 +32,27 @@ namespace kwqft {
  */
 template <typename Real>
 KOKKOS_INLINE_FUNCTION MatrixSun<Real, NCOLORS>
-calculateStaple(const Complex<Real> *gauge_ptr, int id, int oddbit, int mu,
-                int size, const LatticeParams &params) {
+calculateStaple(const Complex<Real> *gaugePtr, int64_t id, int oddbit, int mu,
+                int64_t size, const LatticeParams &params) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
   using ComplexT = Complex<Real>;
 
   MatrixT staple = MatrixT::zero();
 
-  int mustride = params.volume;
-  int muvolume = mu * mustride;
-  int offset = params.size;
+  int64_t mustride = params.volume;
+  int64_t muvolume = mu * mustride;
 
   // Index of current site in even/odd layout
-  int idxoddbit = id + oddbit * params.half_volume;
+  int64_t idxoddbit = id + oddbit * params.half_volume;
 
   // Get neighbor in mu direction
-  int newidmu1 = indexNdNeigEo(id, oddbit, mu, 1, params);
+  int64_t newidmu1 = indexNdNeigEo(id, oddbit, mu, 1, params);
 
   for (int nu = 0; nu < NDIMS; ++nu) {
     if (mu == nu)
       continue;
 
-    int nuvolume = nu * mustride;
+    int64_t nuvolume = nu * mustride;
     MatrixT link;
 
     // Upper staple: U_nu(x) * U_mu(x+nu) * U_nu^\dagger(x+mu)
@@ -61,17 +60,17 @@ calculateStaple(const Complex<Real> *gauge_ptr, int id, int oddbit, int mu,
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
         link.e[i][j] =
-            gauge_ptr[idxoddbit + nuvolume + (j + i * NCOLORS) * size];
+            gaugePtr[idxoddbit + nuvolume + (j + i * NCOLORS) * size];
       }
     }
 
     // Multiply by U_mu(x+nu)
-    int newidnu1 = indexNdNeigEo(id, oddbit, nu, 1, params);
+    int64_t newidnu1 = indexNdNeigEo(id, oddbit, nu, 1, params);
     MatrixT tmp1;
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
         tmp1.e[i][j] =
-            gauge_ptr[newidnu1 + muvolume + (j + i * NCOLORS) * size];
+            gaugePtr[newidnu1 + muvolume + (j + i * NCOLORS) * size];
       }
     }
     link = link * tmp1;
@@ -81,7 +80,7 @@ calculateStaple(const Complex<Real> *gauge_ptr, int id, int oddbit, int mu,
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
         tmp2.e[i][j] =
-            gauge_ptr[newidmu1 + nuvolume + (j + i * NCOLORS) * size];
+            gaugePtr[newidmu1 + nuvolume + (j + i * NCOLORS) * size];
       }
     }
     link = link * tmp2.dagger();
@@ -89,13 +88,13 @@ calculateStaple(const Complex<Real> *gauge_ptr, int id, int oddbit, int mu,
     staple += link;
 
     // Lower staple: U_nu^\dagger(x-nu) * U_mu(x-nu) * U_nu(x+mu-nu)
-    int newidnum1 = indexNdNeigEo(id, oddbit, nu, -1, params);
+    int64_t newidnum1 = indexNdNeigEo(id, oddbit, nu, -1, params);
 
     // Load U_nu^\dagger(x-nu)
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
         link.e[i][j] =
-            gauge_ptr[newidnum1 + nuvolume + (j + i * NCOLORS) * size];
+            gaugePtr[newidnum1 + nuvolume + (j + i * NCOLORS) * size];
       }
     }
     link = link.dagger();
@@ -104,17 +103,17 @@ calculateStaple(const Complex<Real> *gauge_ptr, int id, int oddbit, int mu,
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
         tmp1.e[i][j] =
-            gauge_ptr[newidnum1 + muvolume + (j + i * NCOLORS) * size];
+            gaugePtr[newidnum1 + muvolume + (j + i * NCOLORS) * size];
       }
     }
     link = link * tmp1;
 
     // Multiply by U_nu(x+mu-nu)
-    int newidmun = indexNdNeigEo(id, oddbit, mu, 1, nu, -1, params);
+    int64_t newidmun = indexNdNeigEo(id, oddbit, mu, 1, nu, -1, params);
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
         tmp2.e[i][j] =
-            gauge_ptr[newidmun + nuvolume + (j + i * NCOLORS) * size];
+            gaugePtr[newidmun + nuvolume + (j + i * NCOLORS) * size];
       }
     }
     link = link * tmp2;
@@ -307,7 +306,7 @@ private:
   RandomGenerator &rng_;
   LatticeParams params_;
   double time_;
-  int size_;
+  int64_t size_;
 
 public:
   HeatBath(GaugeT &gauge, RandomGenerator &rng, const LatticeParams &params)
@@ -324,8 +323,8 @@ public:
     auto &pool = rng_.getPool();
     auto gaugeView = gauge_.getView();
     auto params = params_;
-    int size = gauge_.size();
-    int halfVol = params.half_volume;
+    int64_t size = gauge_.size();
+    int64_t halfVol = params.half_volume;
     double betaOverNc = params.beta_over_nc;
 
     // Loop over parities (even/odd)
@@ -333,7 +332,8 @@ public:
       // Loop over directions
       for (int mu = 0; mu < NDIMS; ++mu) {
         Kokkos::parallel_for(
-            "HeatBath", range_policy(0, halfVol), KOKKOS_LAMBDA(const int id) {
+            "HeatBath", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
+            KOKKOS_LAMBDA(const int64_t id) {
               // Get random generator for this thread
               auto gen = pool.get_state();
 
@@ -344,8 +344,8 @@ public:
                                                      size, params);
 
               // Get current link index
-              int idxoddbit = id + parity * halfVol;
-              int muvolume = mu * params.volume;
+              int64_t idxoddbit = id + parity * halfVol;
+              int64_t muvolume = mu * params.volume;
 
               // Load current link
               MatrixT U;
@@ -469,21 +469,21 @@ public:
 
     auto gaugeView = gauge_.getView();
     auto params = params_;
-    int size = gauge_.size();
-    int halfVol = params.half_volume;
+    int64_t size = gauge_.size();
+    int64_t halfVol = params.half_volume;
 
     for (int parity = 0; parity < 2; ++parity) {
       for (int mu = 0; mu < NDIMS; ++mu) {
         Kokkos::parallel_for(
-            "Overrelaxation", range_policy(0, halfVol),
-            KOKKOS_LAMBDA(const int id) {
+            "Overrelaxation", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
+            KOKKOS_LAMBDA(const int64_t id) {
               ComplexT *gaugePtr = gaugeView.data();
 
               MatrixT staple = calculateStaple<Real>(gaugePtr, id, parity, mu,
                                                      size, params);
 
-              int idxoddbit = id + parity * halfVol;
-              int muvolume = mu * params.volume;
+              int64_t idxoddbit = id + parity * halfVol;
+              int64_t muvolume = mu * params.volume;
 
               MatrixT U;
               for (int i = 0; i < NCOLORS; ++i) {
