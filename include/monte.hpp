@@ -322,47 +322,47 @@ public:
     Kokkos::Timer timer;
 
     auto &pool = rng_.getPool();
-    auto gauge_view = gauge_.getView();
+    auto gaugeView = gauge_.getView();
     auto params = params_;
     int size = gauge_.size();
-    int half_vol = params.half_volume;
-    double beta_over_nc = params.beta_over_nc;
+    int halfVol = params.half_volume;
+    double betaOverNc = params.beta_over_nc;
 
     // Loop over parities (even/odd)
     for (int parity = 0; parity < 2; ++parity) {
       // Loop over directions
       for (int mu = 0; mu < NDIMS; ++mu) {
         Kokkos::parallel_for(
-            "HeatBath", range_policy(0, half_vol), KOKKOS_LAMBDA(const int id) {
+            "HeatBath", range_policy(0, halfVol), KOKKOS_LAMBDA(const int id) {
               // Get random generator for this thread
               auto gen = pool.get_state();
 
-              ComplexT *gauge_ptr = gauge_view.data();
+              ComplexT *gaugePtr = gaugeView.data();
 
               // Calculate staple (sum of neighboring plaquettes)
-              MatrixT staple = calculateStaple<Real>(gauge_ptr, id, parity, mu,
+              MatrixT staple = calculateStaple<Real>(gaugePtr, id, parity, mu,
                                                      size, params);
 
               // Get current link index
-              int idxoddbit = id + parity * half_vol;
+              int idxoddbit = id + parity * halfVol;
               int muvolume = mu * params.volume;
 
               // Load current link
               MatrixT U;
               for (int i = 0; i < NCOLORS; ++i) {
                 for (int j = 0; j < NCOLORS; ++j) {
-                  U.e[i][j] = gauge_ptr[idxoddbit + muvolume +
+                  U.e[i][j] = gaugePtr[idxoddbit + muvolume +
                                         (j + i * NCOLORS) * size];
                 }
               }
 
               // Apply heatbath update
-              heatBathSun<Real>(U, staple.dagger(), beta_over_nc, gen);
+              heatBathSun<Real>(U, staple.dagger(), betaOverNc, gen);
 
               // Store updated link
               for (int i = 0; i < NCOLORS; ++i) {
                 for (int j = 0; j < NCOLORS; ++j) {
-                  gauge_ptr[idxoddbit + muvolume + (j + i * NCOLORS) * size] =
+                  gaugePtr[idxoddbit + muvolume + (j + i * NCOLORS) * size] =
                       U.e[i][j];
                 }
               }
@@ -386,24 +386,19 @@ public:
    * @brief Calculate number of floating point operations
    */
   long long flop() const {
-    // Flop count per site for heatbath
-    // Staple: 2*(NDIMS-1) matrix multiplications + additions
-    // Each SU(N) matrix multiply: ~8*N^3 flops
-    // HeatBath update per SU(2) subgroup: ~100 flops
 #if (NCOLORS == 3)
-    long long stapleflop = 2268LL; // Staple calculation
-    long long phbflop = 801LL;     // Pseudo-heatbath update
-    long long ThreadFlop = (stapleflop + phbflop) * size_;
+    long long stapleFlop = 2268LL; // Staple calculation
+    long long phbFlop = 801LL;     // Pseudo-heatbath update
+    long long threadFlop = (stapleFlop + phbFlop) * size_;
 #else
-    double phbflop =
+    long long phbFlop =
         NCOLORS * NCOLORS * NCOLORS +
         (NCOLORS * (NCOLORS - 1) / 2) * (46LL + 48LL + 56LL * NCOLORS);
-    double stapleflop = NCOLORS * NCOLORS * NCOLORS * 84LL;
-    long long ThreadFlop =
-        static_cast<long long>((stapleflop + phbflop) * size_);
+    long long stapleFlop = static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 84LL;
+    long long threadFlop = (stapleFlop + phbFlop) * size_;
 #endif
-    // Factor of 8 = 2 parities * 4 directions
-    return ThreadFlop * 2 * NDIMS;
+    // Factor of 2*NDIMS = 2 parities * NDIMS directions
+    return threadFlop * 2 * NDIMS;
   }
 
   /**
@@ -412,12 +407,12 @@ public:
   long long bytes() const {
     // Read: 7 links for staple + 1 link to update + RNG state
     // Write: 1 link + RNG state
-    int nuparams_ = NCOLORS * NCOLORS * 2; // SOA format
-    // RNG state: XorShift64 uses 128 bytes (conservative estimate)
-    long long rng_state_size = 128LL;
-    long long bytes_per_site =
-        (20LL * nuparams_ * sizeof(Real) + 2LL * rng_state_size);
-    return bytes_per_site * size_ * 2 * NDIMS;
+    int numParams = NCOLORS * NCOLORS * 2; // SOA format
+    // RNG state size: ~48 bytes (similar to cuRNGState)
+    long long rngStateSize = 48LL;
+    long long bytesPerSite =
+        (20LL * numParams * sizeof(Real) + 2LL * rngStateSize);
+    return bytesPerSite * size_ * 2 * NDIMS;
   }
 
   /**
@@ -472,28 +467,28 @@ public:
   void run() {
     Kokkos::Timer timer;
 
-    auto gauge_view = gauge_.getView();
+    auto gaugeView = gauge_.getView();
     auto params = params_;
     int size = gauge_.size();
-    int half_vol = params.half_volume;
+    int halfVol = params.half_volume;
 
     for (int parity = 0; parity < 2; ++parity) {
       for (int mu = 0; mu < NDIMS; ++mu) {
         Kokkos::parallel_for(
-            "Overrelaxation", range_policy(0, half_vol),
+            "Overrelaxation", range_policy(0, halfVol),
             KOKKOS_LAMBDA(const int id) {
-              ComplexT *gauge_ptr = gauge_view.data();
+              ComplexT *gaugePtr = gaugeView.data();
 
-              MatrixT staple = calculateStaple<Real>(gauge_ptr, id, parity, mu,
+              MatrixT staple = calculateStaple<Real>(gaugePtr, id, parity, mu,
                                                      size, params);
 
-              int idxoddbit = id + parity * half_vol;
+              int idxoddbit = id + parity * halfVol;
               int muvolume = mu * params.volume;
 
               MatrixT U;
               for (int i = 0; i < NCOLORS; ++i) {
                 for (int j = 0; j < NCOLORS; ++j) {
-                  U.e[i][j] = gauge_ptr[idxoddbit + muvolume +
+                  U.e[i][j] = gaugePtr[idxoddbit + muvolume +
                                         (j + i * NCOLORS) * size];
                 }
               }
@@ -502,7 +497,7 @@ public:
 
               for (int i = 0; i < NCOLORS; ++i) {
                 for (int j = 0; j < NCOLORS; ++j) {
-                  gauge_ptr[idxoddbit + muvolume + (j + i * NCOLORS) * size] =
+                  gaugePtr[idxoddbit + muvolume + (j + i * NCOLORS) * size] =
                       U.e[i][j];
                 }
               }
@@ -520,29 +515,28 @@ public:
    * @brief Calculate number of floating point operations
    */
   long long flop() const {
-    // Staple + overrelaxation update
 #if (NCOLORS == 3)
-    long long stapleflop = 2268LL;
-    long long ovrflop = 801LL; // Similar to heatbath without RNG
-    long long ThreadFlop = (stapleflop + ovrflop) * params_.half_volume;
+    long long stapleFlop = 2268LL;
+    long long ovrFlop = 801LL; // Similar to heatbath without RNG
+    long long threadFlop = (stapleFlop + ovrFlop) * params_.half_volume;
 #else
-    double ovrflop =
+    long long ovrFlop =
         NCOLORS * NCOLORS * NCOLORS +
         (NCOLORS * (NCOLORS - 1) / 2) * (46LL + 48LL + 56LL * NCOLORS);
-    double stapleflop = NCOLORS * NCOLORS * NCOLORS * 84LL;
-    long long ThreadFlop =
-        static_cast<long long>((stapleflop + ovrflop) * params_.half_volume);
+    long long stapleFlop = static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 84LL;
+    long long threadFlop = (stapleFlop + ovrFlop) * params_.half_volume;
 #endif
-    return ThreadFlop * 2 * NDIMS;
+    // Factor of 2*NDIMS = 2 parities * NDIMS directions
+    return threadFlop * 2 * NDIMS;
   }
 
   /**
    * @brief Calculate bytes read/written
    */
   long long bytes() const {
-    int nuparams_ = NCOLORS * NCOLORS * 2;
-    long long bytes_per_site = 20LL * nuparams_ * sizeof(Real);
-    return bytes_per_site * params_.half_volume * 2 * NDIMS;
+    int numParams = NCOLORS * NCOLORS * 2;
+    long long bytesPerSite = 20LL * numParams * sizeof(Real);
+    return bytesPerSite * params_.half_volume * 2 * NDIMS;
   }
 
   double flops() const {

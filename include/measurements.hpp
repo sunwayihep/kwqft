@@ -115,59 +115,59 @@ public:
   void run() {
     Kokkos::Timer timer;
 
-    auto gauge_view = gauge_.getView();
+    auto gaugeView = gauge_.getView();
     auto params = params_;
     int size = gauge_.size();
     int volume = params.volume;
-    int half_vol = params.half_volume;
+    int halfVol = params.half_volume;
 
-    Real plaq_sum = 0;
-    Real spatial_sum = 0;
-    Real temporal_sum = 0;
+    Real plaqSum = 0;
+    Real spatialSum = 0;
+    Real temporalSum = 0;
 
     // Parallel reduction over all sites (even + odd)
     Kokkos::parallel_reduce(
         "Plaquette", range_policy(0, volume),
         KOKKOS_LAMBDA(const int idd, Real &lsum, Real &ssum, Real &tsum) {
-          ComplexT *gauge_ptr = gauge_view.data();
+          ComplexT *gaugePtr = gaugeView.data();
 
           // Determine parity and half-volume index
           int oddbit = 0;
           int id = idd;
-          if (idd >= half_vol) {
+          if (idd >= halfVol) {
             oddbit = 1;
-            id = idd - half_vol;
+            id = idd - halfVol;
           }
 
           // Current site index in even-odd storage
-          int idxoddbit = id + oddbit * half_vol;
+          int idxoddbit = id + oddbit * halfVol;
 
           // Calculate plaquettes for all mu < nu directions
           MatrixT link1, link;
 
           for (int mu = 0; mu < NDIMS; ++mu) {
             // Load U_mu(x)
-            loadLink(link1, gauge_ptr, idxoddbit, mu, volume, size);
+            loadLink(link1, gaugePtr, idxoddbit, mu, volume, size);
 
             // Get neighbor index x + mu
             int newidmu1 = getNeighborEo(id, oddbit, mu, 1, params);
 
             for (int nu = mu + 1; nu < NDIMS; ++nu) {
               // Load U_nu(x+mu)
-              MatrixT U_nu_xmu;
-              loadLink(U_nu_xmu, gauge_ptr, newidmu1, nu, volume, size);
+              MatrixT uNuXmu;
+              loadLink(uNuXmu, gaugePtr, newidmu1, nu, volume, size);
 
               // Load U_mu(x+nu) - dagger
               int newidnu1 = getNeighborEo(id, oddbit, nu, 1, params);
-              MatrixT U_mu_xnu;
-              loadLink(U_mu_xnu, gauge_ptr, newidnu1, mu, volume, size);
+              MatrixT uMuXnu;
+              loadLink(uMuXnu, gaugePtr, newidnu1, mu, volume, size);
 
               // Load U_nu(x) - dagger
-              MatrixT U_nu;
-              loadLink(U_nu, gauge_ptr, idxoddbit, nu, volume, size);
+              MatrixT uNu;
+              loadLink(uNu, gaugePtr, idxoddbit, nu, volume, size);
 
               // Compute U_mu(x) * U_nu(x+mu) * U_mu^dag(x+nu) * U_nu^dag(x)
-              link = U_nu_xmu * U_mu_xnu.dagger() * U_nu.dagger();
+              link = uNuXmu * uMuXnu.dagger() * uNu.dagger();
               Real tr = (link1 * link).realtrace();
 
               // Separate spatial and temporal plaquettes
@@ -179,12 +179,12 @@ public:
             }
           }
         },
-        plaq_sum, spatial_sum, temporal_sum);
+        plaqSum, spatialSum, temporalSum);
 
     // Normalize: divide by Nc and number of plaquettes
     // Average over different spatial and time directions
-    spatialValue_ = spatial_sum / (Real(NCOLORS) * volume * TOTAL_NUM_SPLAQS);
-    temporalValue_ = temporal_sum / (Real(NCOLORS) * volume * TOTAL_NUM_TPLAQS);
+    spatialValue_ = spatialSum / (Real(NCOLORS) * volume * TOTAL_NUM_SPLAQS);
+    temporalValue_ = temporalSum / (Real(NCOLORS) * volume * TOTAL_NUM_TPLAQS);
     plaqValue_ = (spatialValue_ + temporalValue_) / Real(2);
 
     time_ = timer.seconds();
@@ -210,8 +210,8 @@ public:
    *
    */
   long long bytes() const {
-    int nuparams_ = NCOLORS * NCOLORS * 2; // SOA format (real + imag)
-    return (22LL * nuparams_ + 4LL) * params_.volume * sizeof(Real);
+    int numParams = NCOLORS * NCOLORS * 2; // SOA format (real + imag)
+    return (22LL * numParams + 4LL) * params_.volume * sizeof(Real);
   }
 
   double flops() const {
@@ -267,33 +267,33 @@ public:
   void run() {
     Kokkos::Timer timer;
 
-    auto gauge_view = gauge_.getView();
+    auto gaugeView = gauge_.getView();
     auto params = params_;
     int size = gauge_.size();
 
     // Calculate spatial volume
-    int spatial_volume = 1;
+    int spatialVolume = 1;
     for (int i = 0; i < NDIMS - 1; ++i) {
-      spatial_volume *= params.grid[i];
+      spatialVolume *= params.grid[i];
     }
 
-    int Nt = params.grid[NDIMS - 1];
+    int nt = params.grid[NDIMS - 1];
     int volume = params.volume;
-    int t_dir = NDIMS - 1;
-    int t_volume = t_dir * volume;
+    int tDir = NDIMS - 1;
+    int tVolume = tDir * volume;
 
-    Real poly_re = 0;
-    Real poly_im = 0;
+    Real polyRe = 0;
+    Real polyIm = 0;
 
     // Parallel reduction over spatial sites
     Kokkos::parallel_reduce(
-        "PolyakovLoop", range_policy(0, spatial_volume),
-        KOKKOS_LAMBDA(const int spatial_idx, Real &re_sum, Real &im_sum) {
-          ComplexT *gauge_ptr = gauge_view.data();
+        "PolyakovLoop", range_policy(0, spatialVolume),
+        KOKKOS_LAMBDA(const int spatialIdx, Real &reSum, Real &imSum) {
+          ComplexT *gaugePtr = gaugeView.data();
 
           // Convert spatial index to coordinates
           int x[NDIMS];
-          int temp = spatial_idx;
+          int temp = spatialIdx;
           for (int i = 0; i < NDIMS - 1; ++i) {
             x[i] = temp % params.grid[i];
             temp /= params.grid[i];
@@ -303,31 +303,31 @@ public:
           // Product of temporal links
           MatrixT poly = MatrixT::identity();
 
-          for (int t = 0; t < Nt; ++t) {
+          for (int t = 0; t < nt; ++t) {
             x[NDIMS - 1] = t;
             int idx = indexNdNm<NDIMS>(x, params);
 
             // Load temporal link
-            MatrixT U_t;
+            MatrixT uT;
             for (int i = 0; i < NCOLORS; ++i) {
               for (int j = 0; j < NCOLORS; ++j) {
-                U_t.e[i][j] =
-                    gauge_ptr[idx + t_volume + (j + i * NCOLORS) * size];
+                uT.e[i][j] =
+                    gaugePtr[idx + tVolume + (j + i * NCOLORS) * size];
               }
             }
 
-            poly = poly * U_t;
+            poly = poly * uT;
           }
 
           // Take trace
           ComplexT tr = poly.trace() / Real(NCOLORS);
-          re_sum += tr.real();
-          im_sum += tr.imag();
+          reSum += tr.real();
+          imSum += tr.imag();
         },
-        poly_re, poly_im);
+        polyRe, polyIm);
 
     // Average over spatial volume
-    polyValue_ = ComplexT(poly_re / spatial_volume, poly_im / spatial_volume);
+    polyValue_ = ComplexT(polyRe / spatialVolume, polyIm / spatialVolume);
 
     time_ = timer.seconds();
   }
@@ -340,32 +340,31 @@ public:
    * @brief Calculate number of floating point operations
    */
   long long flop() const {
-    // Per spatial site: Nt matrix multiplications + 1 trace
-    // Each NxN matrix multiply: ~8*N^3 flops
-    int Nt = params_.grid[NDIMS - 1];
-    int spatial_volume = 1;
+    int nt = params_.grid[NDIMS - 1];
+    long long spatialVolume = 1;
     for (int i = 0; i < NDIMS - 1; ++i) {
-      spatial_volume *= params_.grid[i];
+      spatialVolume *= params_.grid[i];
     }
-    long long flop_per_site =
-        static_cast<long long>(Nt) * 8 * NCOLORS * NCOLORS * NCOLORS +
-        2 * NCOLORS;
-    return flop_per_site * spatial_volume;
+#if (NCOLORS == 3)
+    return (4LL + 198LL * nt) * spatialVolume;
+#else
+    return ((NCOLORS - 1) * 2LL +
+            static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 8LL * nt) *
+           spatialVolume;
+#endif
   }
 
   /**
    * @brief Calculate bytes read
    */
   long long bytes() const {
-    // Read Nt temporal links per spatial site
-    int Nt = params_.grid[NDIMS - 1];
-    int spatial_volume = 1;
+    int nt = params_.grid[NDIMS - 1];
+    long long spatialVolume = 1;
     for (int i = 0; i < NDIMS - 1; ++i) {
-      spatial_volume *= params_.grid[i];
+      spatialVolume *= params_.grid[i];
     }
-    int nuparams_ = NCOLORS * NCOLORS * 2;
-    return static_cast<long long>(Nt) * nuparams_ * sizeof(Real) *
-           spatial_volume;
+    int numParams = NCOLORS * NCOLORS * 2;
+    return spatialVolume * (numParams * nt + 2LL) * sizeof(Real);
   }
 
   double flops() const {
@@ -487,21 +486,21 @@ public:
   void run() {
     Kokkos::Timer timer;
 
-    auto gauge_view = gauge_.getView();
-    int size = gauge_.size();       // volume * NDIMS
-    int total_links = params_.size; // volume * NDIMS
+    auto gaugeView = gauge_.getView();
+    int size = gauge_.size();      // volume * NDIMS
+    int totalLinks = params_.size; // volume * NDIMS
 
     Kokkos::parallel_for(
-        "Reunitarize", range_policy(0, total_links),
-        KOKKOS_LAMBDA(const int link_idx) {
-          ComplexT *gauge_ptr = gauge_view.data();
+        "Reunitarize", range_policy(0, totalLinks),
+        KOKKOS_LAMBDA(const int linkIdx) {
+          ComplexT *gaugePtr = gaugeView.data();
 
           // Load matrix from SOA format
-          // Index: link_idx + elem_idx * size
+          // Index: linkIdx + elemIdx * size
           MatrixT U;
           for (int i = 0; i < NCOLORS; ++i) {
             for (int j = 0; j < NCOLORS; ++j) {
-              U.e[i][j] = gauge_ptr[link_idx + (j + i * NCOLORS) * size];
+              U.e[i][j] = gaugePtr[linkIdx + (j + i * NCOLORS) * size];
             }
           }
 
@@ -511,7 +510,7 @@ public:
           // Store back
           for (int i = 0; i < NCOLORS; ++i) {
             for (int j = 0; j < NCOLORS; ++j) {
-              gauge_ptr[link_idx + (j + i * NCOLORS) * size] = U.e[i][j];
+              gaugePtr[linkIdx + (j + i * NCOLORS) * size] = U.e[i][j];
             }
           }
         });
@@ -526,24 +525,31 @@ public:
    * @brief Calculate number of floating point operations
    */
   long long flop() const {
-    // Gram-Schmidt per matrix: O(N^3) operations
-    // For SU(3): ~100 flops per matrix
 #if (NCOLORS == 3)
-    long long flop_per_link = 100LL;
+    // For SOA format, getNumFlop returns 0, so just use 126LL for reunit ops
+    long long flopPerLink = 126LL;
 #else
-    long long flop_per_link =
-        static_cast<long long>(NCOLORS * NCOLORS * NCOLORS) * 3;
+    // General Gram-Schmidt complexity
+    unsigned int tmpGs = 0;
+    unsigned int tmpDet = 0;
+    for (int i = 0; i < NCOLORS; i++) {
+      tmpGs += i + 1;
+      tmpDet += i;
+    }
+    tmpDet = tmpGs * NCOLORS * 8 + tmpDet * (NCOLORS * 8 + 11);
+    tmpGs = tmpGs * NCOLORS * 16 + NCOLORS * (NCOLORS * 6 + 2);
+    long long flopPerLink = static_cast<long long>(tmpGs + tmpDet);
 #endif
-    return flop_per_link * params_.size;
+    return flopPerLink * params_.size;
   }
 
   /**
    * @brief Calculate bytes read/written
    */
   long long bytes() const {
-    int nuparams_ = NCOLORS * NCOLORS * 2;
+    int numParams = NCOLORS * NCOLORS * 2;
     // Read + write one matrix per link
-    return 2LL * nuparams_ * sizeof(Real) * params_.size;
+    return 2LL * numParams * sizeof(Real) * params_.size;
   }
 
   double flops() const {
