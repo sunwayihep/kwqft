@@ -36,13 +36,13 @@ ParamsHostView &get_host_params_mirror() {
 }
 
 void initializeParams(const std::vector<int> &lattice_size, double beta,
-                      bool verbose) {
+                      bool verbose, double xi0) {
   if (PARAMS::initialized) {
     KWQFT_WARNING("Parameters already initialized");
     return;
   }
 
-  PARAMS::params.initialize(lattice_size, beta);
+  PARAMS::params.initialize(lattice_size, beta, xi0);
   PARAMS::initialized = true;
 
   // Initialize device params view (lazy)
@@ -86,6 +86,7 @@ void print_params() {
   printf("  Volume: %d\n", PARAMS::params.volume);
   printf("  Beta: %.6f\n", PARAMS::params.beta);
   printf("  Beta/Nc: %.6f\n", PARAMS::params.beta_over_nc);
+  printf("  Xi0: %.6f\n", PARAMS::params.xi0);
   printf("  Number of colors: %d\n", NCOLORS);
   printf("  Number of dimensions: %d\n", NDIMS);
   printf("==========================================================\n");

@@ -35,6 +35,8 @@ struct LatticeParams {
 
   double beta;         // Gauge coupling
   double beta_over_nc; // beta / Nc
+  double xi0;          // Bare anisotropy, xi0=1 for isotropic
+  double coeffs[NDIMS][NDIMS]; // Anisotropic plaquette coefficients
 
   bool use_texture; // Use texture memory (for CUDA)
 
@@ -43,16 +45,20 @@ struct LatticeParams {
   LatticeParams()
       : volume(0), half_volume(0), volume_with_ghost(0),
         half_volume_with_ghost(0), size(0), kstride(0), tstride(0), beta(0.0),
-        beta_over_nc(0.0), use_texture(false) {
+        beta_over_nc(0.0), xi0(1.0), use_texture(false) {
     for (int i = 0; i < NDIMS; ++i) {
       grid[i] = 0;
       grid_with_ghost[i] = 0;
       border[i] = 0;
+      for (int j = 0; j < NDIMS; ++j) {
+        coeffs[i][j] = (i == j) ? 0.0 : 1.0;
+      }
     }
   }
 
   // Initialize from lattice dimensions and beta
-  void initialize(const std::vector<int> &lattice_size, double _beta) {
+  void initialize(const std::vector<int> &lattice_size, double _beta,
+                  double _xi0 = 1.0) {
     if (static_cast<int>(lattice_size.size()) != NDIMS) {
       KWQFT_ERROR("Lattice size vector must have NDIMS elements");
     }
@@ -79,6 +85,26 @@ struct LatticeParams {
 
     beta = _beta;
     beta_over_nc = beta / static_cast<double>(NCOLORS);
+    xi0 = _xi0;
+
+    // Wilson anisotropic plaquette convention:
+    // spatial-spatial: beta/xi0, spatial-temporal: beta*xi0.
+    // The global beta/Nc factor is applied in heatbath, so here we only store
+    // direction-dependent multipliers.
+    const int t_dir = NDIMS - 1;
+    const double spatial_coeff = 1.0 / xi0;
+    const double temporal_coeff = xi0;
+    for (int mu = 0; mu < NDIMS; ++mu) {
+      for (int nu = 0; nu < NDIMS; ++nu) {
+        if (mu == nu) {
+          coeffs[mu][nu] = 0.0;
+        } else if (mu == t_dir || nu == t_dir) {
+          coeffs[mu][nu] = temporal_coeff;
+        } else {
+          coeffs[mu][nu] = spatial_coeff;
+        }
+      }
+    }
   }
 
   // Get grid dimension
@@ -119,7 +145,7 @@ ParamsHostView &get_host_params_mirror();
  * @brief Initialize the global lattice parameters
  */
 void initializeParams(const std::vector<int> &lattice_size, double beta,
-                      bool verbose = true);
+                      bool verbose = true, double xi0 = 1.0);
 
 /**
  * @brief Copy parameters to device memory

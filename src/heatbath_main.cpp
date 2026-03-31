@@ -19,19 +19,21 @@ using namespace kwqft;
  * @brief Parse command line arguments
  */
 void print_usage(const char *prog_name) {
-  printf("Usage: %s L1 L2 ... Ln beta ntraj\n", prog_name);
+  printf("Usage: %s L1 L2 ... Ln beta ntraj [xi0]\n", prog_name);
   printf("  L1, L2, ..., Ln: lattice dimensions (n = NDIMS = %d)\n", NDIMS);
   printf("  beta: gauge coupling\n");
   printf("  ntraj: number of trajectories\n");
-  printf("\nExample: %s 8 8 8 16 6.0 100\n", prog_name);
+  printf("  xi0: bare anisotropy (optional, default 1.0)\n");
+  printf("\nExample (isotropic): %s 8 8 8 16 6.0 100\n", prog_name);
+  printf("Example (anisotropic): %s 8 8 8 16 6.0 100 5.0\n", prog_name);
 }
 
 template <typename Real>
 void run_heatbath(const std::vector<int> &lattice_size, double beta,
-                  int ntraj) {
+                  int ntraj, double xi0) {
 
   // Initialize parameters
-  initializeParams(lattice_size, beta, true);
+  initializeParams(lattice_size, beta, true, xi0);
   auto &params = PARAMS::params;
 
   // Create gauge field
@@ -130,8 +132,9 @@ int main(int argc, char *argv[]) {
     kwqft::initialize(argc, argv);
 
     // Parse command line arguments
-    if (argc != NDIMS + 3) {
-      printf("Error: Expected %d arguments, got %d\n", NDIMS + 2, argc - 1);
+    if (argc != NDIMS + 3 && argc != NDIMS + 4) {
+      printf("Error: Expected %d or %d arguments, got %d\n", NDIMS + 2,
+             NDIMS + 3, argc - 1);
       print_usage(argv[0]);
       Kokkos::finalize();
       return 1;
@@ -152,6 +155,10 @@ int main(int argc, char *argv[]) {
     // Parse beta and ntraj
     double beta = atof(argv[NDIMS + 1]);
     int ntraj = atoi(argv[NDIMS + 2]);
+    double xi0 = 1.0;
+    if (argc == NDIMS + 4) {
+      xi0 = atof(argv[NDIMS + 3]);
+    }
 
     if (beta <= 0) {
       printf("Error: Invalid beta = %f\n", beta);
@@ -161,6 +168,11 @@ int main(int argc, char *argv[]) {
 
     if (ntraj <= 0) {
       printf("Error: Invalid ntraj = %d\n", ntraj);
+      Kokkos::finalize();
+      return 1;
+    }
+    if (xi0 <= 0.0) {
+      printf("Error: Invalid xi0 = %f\n", xi0);
       Kokkos::finalize();
       return 1;
     }
@@ -176,10 +188,11 @@ int main(int argc, char *argv[]) {
     printf("\n");
     printf("Beta: %f\n", beta);
     printf("Number of trajectories: %d\n", ntraj);
+    printf("Xi0 (bare anisotropy): %f\n", xi0);
     printf("\n");
 
     // Run simulation with double precision
-    run_heatbath<double>(lattice_size, beta, ntraj);
+    run_heatbath<double>(lattice_size, beta, ntraj, xi0);
 
     kwqft::finalize();
   }

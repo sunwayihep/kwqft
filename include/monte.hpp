@@ -85,7 +85,7 @@ calculateStaple(const Complex<Real> *gaugePtr, int64_t id, int oddbit, int mu,
     }
     link = link * tmp2.dagger();
 
-    staple += link;
+    staple += link * static_cast<Real>(params.coeffs[mu][nu]);
 
     // Lower staple: U_nu^\dagger(x-nu) * U_mu(x-nu) * U_nu(x+mu-nu)
     int64_t newidnum1 = indexNdNeigEo(id, oddbit, nu, -1, params);
@@ -118,7 +118,7 @@ calculateStaple(const Complex<Real> *gaugePtr, int64_t id, int oddbit, int mu,
     }
     link = link * tmp2;
 
-    staple += link;
+    staple += link * static_cast<Real>(params.coeffs[mu][nu]);
   }
 
   return staple;

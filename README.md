@@ -115,14 +115,20 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 ### Generating Gauge Field Configurations
 
 ```bash
-# Format: ./heatbath L1 L2 L3 L4 beta ntraj
+# Format: ./heatbath L1 L2 L3 L4 beta ntraj [xi0]
 ./heatbath 8 8 8 16 6.0 1000
+./heatbath 8 8 8 16 6.0 1000 2.0
 ```
 
 Parameter description:
 - `L1 L2 L3 L4`: Lattice dimensions (x, y, z, t)
 - `beta`: Gauge coupling constant
 - `ntraj`: Number of trajectories
+- `xi0`: Bare anisotropy (optional, default `1.0`)
+
+When `xi0 != 1`, the code uses anisotropic Wilson plaquette weights:
+- spatial-spatial plaquettes: `beta / xi0`
+- spatial-temporal plaquettes: `beta * xi0`
 
 ### Running Tests
 
