@@ -13,6 +13,7 @@
 #include "constants.hpp"
 #include "gauge_array.hpp"
 #include "index.hpp"
+#include "shift.hpp"
 #include "kwqft_common.hpp"
 #include "matrixsun.hpp"
 #include "msu2.hpp"
@@ -27,98 +28,50 @@ namespace kwqft {
 /**
  * @brief Calculate staple at a given site and direction
  *
- * The staple is the sum of products of links that form plaquettes
- * with the link at (id, mu)
+ * Uses QDP/Chroma-style \ref shift_eo (QDP: \c dest(x)=src(x+e_mu) for
+ * \c shift(src, FORWARD, mu)) to fetch links. The matrix product order matches
+ * the MILC-style upper/lower paths used previously in KWQFT (equivalent plaquette
+ * to Chroma’s \c PlaqGaugeAct::staple up to a cyclic rewrite of the loop).
  */
 template <typename Real>
 KOKKOS_INLINE_FUNCTION MatrixSun<Real, NCOLORS>
 calculateStaple(const Complex<Real> *gaugePtr, int64_t id, int oddbit, int mu,
-                int64_t size, const LatticeParams &params) {
+                int64_t soa_stride, const LatticeParams &params) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
-  using ComplexT = Complex<Real>;
 
   MatrixT staple = MatrixT::zero();
+  const int64_t idx_eo = id + oddbit * params.half_volume;
 
-  int64_t mustride = params.volume;
-  int64_t muvolume = mu * mustride;
-
-  // Index of current site in even/odd layout
-  int64_t idxoddbit = id + oddbit * params.half_volume;
-
-  // Get neighbor in mu direction
-  int64_t newidmu1 = indexNdNeigEo(id, oddbit, mu, 1, params);
+  MatrixT u_nu_x, u_mu_x_plus_nu, u_nu_x_plus_mu, tmp;
 
   for (int nu = 0; nu < NDIMS; ++nu) {
-    if (mu == nu)
+    if (nu == mu)
       continue;
 
-    int64_t nuvolume = nu * mustride;
-    MatrixT link;
+    const Real coeff = static_cast<Real>(params.coeffs[mu][nu]);
 
-    // Upper staple: U_nu(x) * U_mu(x+nu) * U_nu^\dagger(x+mu)
-    // Load U_nu(x)
-    for (int i = 0; i < NCOLORS; ++i) {
-      for (int j = 0; j < NCOLORS; ++j) {
-        link.e[i][j] =
-            gaugePtr[idxoddbit + nuvolume + (j + i * NCOLORS) * size];
-      }
-    }
+    // Upper: U_nu(x) * U_mu(x+nu) * U_nu^dag(x+mu)
+    loadGaugeLinkSoa(gaugePtr, idx_eo, nu, soa_stride, params, u_nu_x);
+    loadGaugeLinkSoa(gaugePtr, shift_eo(idx_eo, nu, SHIFT_FORWARD, params), mu,
+                     soa_stride, params, u_mu_x_plus_nu);
+    loadGaugeLinkSoa(gaugePtr, shift_eo(idx_eo, mu, SHIFT_FORWARD, params), nu,
+                     soa_stride, params, u_nu_x_plus_mu);
+    tmp = u_nu_x * u_mu_x_plus_nu * u_nu_x_plus_mu.dagger();
+    staple += tmp * coeff;
 
-    // Multiply by U_mu(x+nu)
-    int64_t newidnu1 = indexNdNeigEo(id, oddbit, nu, 1, params);
-    MatrixT tmp1;
-    for (int i = 0; i < NCOLORS; ++i) {
-      for (int j = 0; j < NCOLORS; ++j) {
-        tmp1.e[i][j] =
-            gaugePtr[newidnu1 + muvolume + (j + i * NCOLORS) * size];
-      }
-    }
-    link = link * tmp1;
-
-    // Multiply by U_nu^\dagger(x+mu)
-    MatrixT tmp2;
-    for (int i = 0; i < NCOLORS; ++i) {
-      for (int j = 0; j < NCOLORS; ++j) {
-        tmp2.e[i][j] =
-            gaugePtr[newidmu1 + nuvolume + (j + i * NCOLORS) * size];
-      }
-    }
-    link = link * tmp2.dagger();
-
-    staple += link * static_cast<Real>(params.coeffs[mu][nu]);
-
-    // Lower staple: U_nu^\dagger(x-nu) * U_mu(x-nu) * U_nu(x+mu-nu)
-    int64_t newidnum1 = indexNdNeigEo(id, oddbit, nu, -1, params);
-
-    // Load U_nu^\dagger(x-nu)
-    for (int i = 0; i < NCOLORS; ++i) {
-      for (int j = 0; j < NCOLORS; ++j) {
-        link.e[i][j] =
-            gaugePtr[newidnum1 + nuvolume + (j + i * NCOLORS) * size];
-      }
-    }
-    link = link.dagger();
-
-    // Multiply by U_mu(x-nu)
-    for (int i = 0; i < NCOLORS; ++i) {
-      for (int j = 0; j < NCOLORS; ++j) {
-        tmp1.e[i][j] =
-            gaugePtr[newidnum1 + muvolume + (j + i * NCOLORS) * size];
-      }
-    }
-    link = link * tmp1;
-
-    // Multiply by U_nu(x+mu-nu)
-    int64_t newidmun = indexNdNeigEo(id, oddbit, mu, 1, nu, -1, params);
-    for (int i = 0; i < NCOLORS; ++i) {
-      for (int j = 0; j < NCOLORS; ++j) {
-        tmp2.e[i][j] =
-            gaugePtr[newidmun + nuvolume + (j + i * NCOLORS) * size];
-      }
-    }
-    link = link * tmp2;
-
-    staple += link * static_cast<Real>(params.coeffs[mu][nu]);
+    // Lower: U_nu^dag(x-nu) * U_mu(x-nu) * U_nu(x+mu-nu)
+    const int64_t idx_x_minus_nu =
+        shift_eo(idx_eo, nu, SHIFT_BACKWARD, params);
+    loadGaugeLinkSoa(gaugePtr, idx_x_minus_nu, nu, soa_stride, params, u_nu_x);
+    loadGaugeLinkSoa(gaugePtr, idx_x_minus_nu, mu, soa_stride, params,
+                     u_mu_x_plus_nu);
+    loadGaugeLinkSoa(
+        gaugePtr,
+        shift_eo(shift_eo(idx_eo, mu, SHIFT_FORWARD, params), nu,
+                 SHIFT_BACKWARD, params),
+        nu, soa_stride, params, u_nu_x_plus_mu);
+    tmp = u_nu_x.dagger() * u_mu_x_plus_nu * u_nu_x_plus_mu;
+    staple += tmp * coeff;
   }
 
   return staple;
