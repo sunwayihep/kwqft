@@ -12,9 +12,16 @@
 #include "complex.hpp"
 #include "constants.hpp"
 #include "gauge_array.hpp"
+#include "gauge_halo.hpp"
 #include "index.hpp"
 #include "kwqft_common.hpp"
 #include "matrixsun.hpp"
+#include "neighbor_access.hpp"
+#include "mpi_layout.hpp"
+
+#ifdef KWQFT_USE_MPI
+#include <mpi.h>
+#endif
 
 namespace kwqft {
 
@@ -39,73 +46,17 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
+  GaugeHaloBuffers<Real> *halo_;
   Real plaqValue_;
   Real spatialValue_;
   Real temporalValue_;
   double time_;
 
-  /**
-   * @brief Helper function to load a gauge link from even-odd storage
-   */
-  KOKKOS_INLINE_FUNCTION
-  static void loadLink(MatrixT &U, const ComplexT *gaugePtr, int64_t idx,
-                       int mu, int64_t volume, int64_t size) {
-    int64_t muvolume = mu * volume;
-    for (int i = 0; i < NCOLORS; ++i) {
-      for (int j = 0; j < NCOLORS; ++j) {
-        U.e[i][j] = gaugePtr[idx + muvolume + (j + i * NCOLORS) * size];
-      }
-    }
-  }
-
-  /**
-   * @brief Get neighbor index in even-odd ordering (simplified for single GPU)
-   */
-  KOKKOS_INLINE_FUNCTION
-  static int64_t getNeighborEo(int64_t id, int oddbit, int mu, int lmu,
-                               const LatticeParams &p) {
-    // Convert even-odd index to coordinates using indexNdEo logic
-    int x[NDIMS];
-    int64_t factor = id / (p.grid[0] / 2);
-    for (int i = 1; i < NDIMS; ++i) {
-      int64_t factor1 = factor / p.grid[i];
-      x[i] = static_cast<int>(factor - factor1 * p.grid[i]);
-      factor = factor1;
-    }
-    int sum = 0;
-    for (int i = 1; i < NDIMS; ++i) {
-      sum += x[i];
-    }
-    int xodd = (sum + oddbit) & 1;
-    x[0] = static_cast<int>((id * 2 + xodd) - id / (p.grid[0] / 2) * p.grid[0]);
-
-    // Move to neighbor
-    x[mu] = (x[mu] + lmu + p.grid[mu]) % p.grid[mu];
-
-    // Convert coordinates to normal linear index, then to EO index
-    int64_t pos = 0;
-    factor = 1;
-    for (int i = 0; i < NDIMS; ++i) {
-      pos += x[i] * factor;
-      factor *= p.grid[i];
-    }
-    pos /= 2; // Convert to half-volume index
-
-    // Determine parity of neighbor and add offset for odd sites
-    int sumX = 0;
-    for (int i = 0; i < NDIMS; ++i) {
-      sumX += x[i];
-    }
-    int oddbit1 = sumX & 1;
-    pos += oddbit1 * p.half_volume;
-
-    return pos;
-  }
-
 public:
-  Plaquette(GaugeT &gauge, const LatticeParams &params)
-      : gauge_(gauge), params_(params), plaqValue_(0), spatialValue_(0),
-        temporalValue_(0), time_(0) {}
+  Plaquette(GaugeT &gauge, const LatticeParams &params,
+            GaugeHaloBuffers<Real> *halo = nullptr)
+      : gauge_(gauge), params_(params), halo_(halo), plaqValue_(0),
+        spatialValue_(0), temporalValue_(0), time_(0) {}
 
   /**
    * @brief Compute the plaquette using even-odd storage format
@@ -119,17 +70,24 @@ public:
     int64_t volume = params.volume;
     int64_t halfVol = params.half_volume;
 
+    if (halo_ && params.mpi) {
+      halo_->exchange(gaugeView.data(), size, params);
+    }
+    GaugeHaloDevice<Real> halo_dev =
+        (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
+    const GaugeHaloDevice<Real> *halo_ptr =
+        (params.mpi && halo_) ? &halo_dev : nullptr;
+
     Real plaqSum = 0;
     Real spatialSum = 0;
     Real temporalSum = 0;
 
-    // Parallel reduction over all sites (even + odd)
     Kokkos::parallel_reduce(
         "Plaquette", Kokkos::RangePolicy<DefaultExecSpace>(0, volume),
         KOKKOS_LAMBDA(const int64_t idd, Real &lsum, Real &ssum, Real &tsum) {
+          (void)lsum;
           ComplexT *gaugePtr = gaugeView.data();
 
-          // Determine parity and half-volume index
           int oddbit = 0;
           int64_t id = idd;
           if (idd >= halfVol) {
@@ -137,52 +95,68 @@ public:
             id = idd - halfVol;
           }
 
-          // Current site index in even-odd storage
-          int64_t idxoddbit = id + oddbit * halfVol;
-
-          // Calculate plaquettes for all mu < nu directions
-          MatrixT link1, link;
+          int x[NDIMS];
+          eo_to_coords(id, oddbit, x, params);
 
           for (int mu = 0; mu < NDIMS; ++mu) {
-            // Load U_mu(x)
-            loadLink(link1, gaugePtr, idxoddbit, mu, volume, size);
-
-            // Get neighbor index x + mu
-            int64_t newidmu1 = getNeighborEo(id, oddbit, mu, 1, params);
+            MatrixT uMuX;
+            loadGaugeLinkAtCoords(gaugePtr, size, halo_ptr, x, mu, params,
+                                  uMuX);
+            int xpmu[NDIMS];
+            for (int d = 0; d < NDIMS; ++d) {
+              xpmu[d] = x[d];
+            }
+            xpmu[mu]++;
 
             for (int nu = mu + 1; nu < NDIMS; ++nu) {
-              // Load U_nu(x+mu)
-              MatrixT uNuXmu;
-              loadLink(uNuXmu, gaugePtr, newidmu1, nu, volume, size);
+              MatrixT uNuXmu, uMuXnu, uNuX;
+              loadGaugeLinkAtCoords(gaugePtr, size, halo_ptr, xpmu, nu, params,
+                                    uNuXmu);
+              int xpnu[NDIMS];
+              for (int d = 0; d < NDIMS; ++d) {
+                xpnu[d] = x[d];
+              }
+              xpnu[nu]++;
+              loadGaugeLinkAtCoords(gaugePtr, size, halo_ptr, xpnu, mu, params,
+                                    uMuXnu);
+              loadGaugeLinkAtCoords(gaugePtr, size, halo_ptr, x, nu, params,
+                                    uNuX);
+              MatrixT link = uNuXmu * uMuXnu.dagger() * uNuX.dagger();
+              Real tr = (uMuX * link).realtrace();
 
-              // Load U_mu(x+nu) - dagger
-              int64_t newidnu1 = getNeighborEo(id, oddbit, nu, 1, params);
-              MatrixT uMuXnu;
-              loadLink(uMuXnu, gaugePtr, newidnu1, mu, volume, size);
-
-              // Load U_nu(x) - dagger
-              MatrixT uNu;
-              loadLink(uNu, gaugePtr, idxoddbit, nu, volume, size);
-
-              // Compute U_mu(x) * U_nu(x+mu) * U_mu^dag(x+nu) * U_nu^dag(x)
-              link = uNuXmu * uMuXnu.dagger() * uNu.dagger();
-              Real tr = (link1 * link).realtrace();
-
-              // Separate spatial and temporal plaquettes
               if (nu == NDIMS - 1) {
-                tsum += tr; // Temporal plaquette (mu,T) or (T,nu)
+                tsum += tr;
               } else {
-                ssum += tr; // Spatial plaquette
+                ssum += tr;
               }
             }
           }
         },
         plaqSum, spatialSum, temporalSum);
 
-    // Normalize: divide by Nc and number of plaquettes
-    // Average over different spatial and time directions
-    spatialValue_ = spatialSum / (Real(NCOLORS) * volume * TOTAL_NUM_SPLAQS);
-    temporalValue_ = temporalSum / (Real(NCOLORS) * volume * TOTAL_NUM_TPLAQS);
+#ifdef KWQFT_USE_MPI
+    if (params_.mpi) {
+      double loc[2] = {static_cast<double>(spatialSum),
+                       static_cast<double>(temporalSum)};
+      double glob[2];
+      MPI_Allreduce(loc, glob, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      spatialSum = static_cast<Real>(glob[0]);
+      temporalSum = static_cast<Real>(glob[1]);
+    }
+#endif
+
+    int64_t norm_vol = params_.volume;
+    if (params_.mpi) {
+      norm_vol = 1;
+      for (int d = 0; d < NDIMS; ++d) {
+        norm_vol *= static_cast<int64_t>(params_.global_grid[d]);
+      }
+    }
+
+    spatialValue_ =
+        spatialSum / (Real(NCOLORS) * norm_vol * TOTAL_NUM_SPLAQS);
+    temporalValue_ =
+        temporalSum / (Real(NCOLORS) * norm_vol * TOTAL_NUM_TPLAQS);
     plaqValue_ = (spatialValue_ + temporalValue_) / Real(2);
 
     time_ = timer.seconds();
@@ -222,6 +196,9 @@ public:
   }
 
   void printValue() const {
+    if (params_.mpi && mpi_comm_rank() != 0) {
+      return;
+    }
     printf("Plaquette: %.12f (spatial: %.12f, temporal: %.12f)\n",
            static_cast<double>(plaqValue_), static_cast<double>(spatialValue_),
            static_cast<double>(temporalValue_));
@@ -264,6 +241,12 @@ public:
    */
   void run() {
     Kokkos::Timer timer;
+
+    if (params_.mpi && params_.proc_grid[NDIMS - 1] != 1) {
+      polyValue_ = ComplexT(0, 0);
+      time_ = timer.seconds();
+      return;
+    }
 
     auto gaugeView = gauge_.getView();
     auto params = params_;
@@ -325,8 +308,23 @@ public:
         },
         polyRe, polyIm);
 
-    // Average over spatial volume
-    polyValue_ = ComplexT(polyRe / spatialVolume, polyIm / spatialVolume);
+#ifdef KWQFT_USE_MPI
+    if (params_.mpi && params_.proc_grid[NDIMS - 1] == 1) {
+      double lr[2] = {static_cast<double>(polyRe), static_cast<double>(polyIm)};
+      double gr[2];
+      MPI_Allreduce(lr, gr, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      int64_t gsp = 1;
+      for (int i = 0; i < NDIMS - 1; ++i) {
+        gsp *= static_cast<int64_t>(params_.global_grid[i]);
+      }
+      polyValue_ = ComplexT(static_cast<Real>(gr[0] / static_cast<double>(gsp)),
+                            static_cast<Real>(gr[1] / static_cast<double>(gsp)));
+    } else
+#endif
+    {
+      polyValue_ =
+          ComplexT(polyRe / spatialVolume, polyIm / spatialVolume);
+    }
 
     time_ = timer.seconds();
   }
@@ -376,6 +374,13 @@ public:
   }
 
   void printValue() const {
+    if (params_.mpi && mpi_comm_rank() != 0) {
+      return;
+    }
+    if (params_.mpi && params_.proc_grid[NDIMS - 1] != 1) {
+      printf("Polyakov Loop: N/A (MPI split along time direction)\n");
+      return;
+    }
     printf("Polyakov Loop: %.12f + %.12f i (|P| = %.12f)\n",
            static_cast<double>(polyValue_.real()),
            static_cast<double>(polyValue_.imag()),

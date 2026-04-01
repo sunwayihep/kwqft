@@ -4,199 +4,234 @@
  *
  * This is a Kokkos-portable version that can run on CPU or GPU
  * depending on the build configuration
+ *
+ * MPI (optional): \c mpirun -np P ./heatbath -geom p0 p1 ... p_{n-1} L0 ... L_{n-1}
+ * beta ntraj [xi0] with ∏ p_i = P and L_i divisible by p_i (Chroma-style).
  */
 
 #include "kwqft.hpp"
+#ifdef KWQFT_USE_MPI
+#include "gauge_halo.hpp"
+#endif
+#include "mpi_layout.hpp"
+
 #include <Kokkos_Core.hpp>
 #include <cstdlib>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
 
 using namespace kwqft;
 
-/**
- * @brief Parse command line arguments
- */
 void print_usage(const char *prog_name) {
-  printf("Usage: %s L1 L2 ... Ln beta ntraj [xi0]\n", prog_name);
-  printf("  L1, L2, ..., Ln: lattice dimensions (n = NDIMS = %d)\n", NDIMS);
-  printf("  beta: gauge coupling\n");
-  printf("  ntraj: number of trajectories\n");
-  printf("  xi0: bare anisotropy (optional, default 1.0)\n");
-  printf("\nExample (isotropic): %s 8 8 8 16 6.0 100\n", prog_name);
-  printf("Example (anisotropic): %s 8 8 8 16 6.0 100 5.0\n", prog_name);
+  printf("Usage:\n");
+  printf("  %s [-geom|--geom p0 p1 ... p_{n-1}] L0 L1 ... L_{n-1} beta ntraj [xi0]\n",
+         prog_name);
+  printf("  NDIMS = %d. Optional -geom: MPI process grid (MPI builds only);\n",
+         NDIMS);
+  printf("  then global lattice sizes L0..L_{n-1}, beta, trajectory count, optional xi0.\n");
+  printf("\nExample (serial): %s 8 8 8 16 6.0 100\n", prog_name);
+  printf("Example (MPI, 8 ranks): mpirun -np 8 %s -geom 1 2 2 2 4 4 4 8 6.0 10\n",
+         prog_name);
 }
 
 template <typename Real>
-void run_heatbath(const std::vector<int> &lattice_size, double beta,
-                  int ntraj, double xi0) {
-
-  // Initialize parameters
-  initializeParams(lattice_size, beta, true, xi0);
+void run_heatbath(int ntraj) {
   auto &params = PARAMS::params;
 
-  // Create gauge field
+#ifdef KWQFT_USE_MPI
+  std::unique_ptr<GaugeHaloBuffers<Real>> halo_storage;
+  GaugeHaloBuffers<Real> *halo_ptr = nullptr;
+  if (params.mpi) {
+    halo_storage = std::make_unique<GaugeHaloBuffers<Real>>(params);
+    halo_ptr = halo_storage.get();
+  }
+#endif
+
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
                          params.volume * NDIMS, true);
-  gauge.details();
+  if (mpi_comm_rank() == 0) {
+    gauge.details();
+  }
 
-  // Initialize random number generator
-  unsigned int seed = 1234;
+  unsigned int seed =
+      1234u + static_cast<unsigned int>(mpi_comm_rank());
   RandomGenerator rng(seed, params.half_volume);
-  printf("RNG initialized with seed %u\n", seed);
-
-  // Cold start
-  printf("Initializing gauge field (cold start)...\n");
+  if (mpi_comm_rank() == 0) {
+    printf("RNG initialized with seed %u\n", seed);
+    printf("Initializing gauge field (cold start)...\n");
+  }
   gauge.initCold();
 
-  // Create update and measurement objects
+#ifdef KWQFT_USE_MPI
+  HeatBath<Real> heatbath(gauge, rng, params, halo_ptr);
+  Plaquette<Real> plaquette(gauge, params, halo_ptr);
+#else
   HeatBath<Real> heatbath(gauge, rng, params);
-  Reunitarize<Real> reunitarize(gauge, params);
   Plaquette<Real> plaquette(gauge, params);
+#endif
+  Reunitarize<Real> reunitarize(gauge, params);
   PolyakovLoop<Real> polyakov(gauge, params);
 
-  // Initial measurement
   plaquette.run();
   polyakov.run();
-  printf("Initial configuration:\n");
-  plaquette.printValue();
-  polyakov.printValue();
-  printf("\n");
+  if (mpi_comm_rank() == 0) {
+    printf("Initial configuration:\n");
+    plaquette.printValue();
+    polyakov.printValue();
+    printf("\n");
+  }
 
-  // Configuration save settings
   int num_warmup = 0;
   int save_interval = 100;
   std::ostringstream prefix_stream;
-  prefix_stream << "su" << NCOLORS << "_nd" << NDIMS << "_beta" << beta;
+  prefix_stream << "su" << NCOLORS << "_nd" << NDIMS << "_beta" << params.beta;
   for (int i = 0; i < NDIMS; ++i) {
-    prefix_stream << "_L" << lattice_size[i];
+    prefix_stream << "_L" << params.global_grid[i];
   }
   std::string save_prefix = prefix_stream.str();
 
-  // Main trajectory loop
   Timer total_timer;
   total_timer.start();
 
   for (int traj = 1; traj <= ntraj; ++traj) {
-    printf("========== Trajectory %d ==========\n", traj);
+    if (mpi_comm_rank() == 0) {
+      printf("========== Trajectory %d ==========\n", traj);
+    }
     Timer traj_timer;
     traj_timer.start();
 
-    // Heatbath update
     heatbath.run();
-
-    // Reunitarize
     reunitarize.run();
 
     traj_timer.stop();
 
-    // Measurements
     plaquette.run();
     polyakov.run();
 
-    plaquette.printValue();
-    polyakov.printValue();
+    if (mpi_comm_rank() == 0) {
+      plaquette.printValue();
+      polyakov.printValue();
+      printf("\nPerformance statistics:\n");
+      heatbath.stat();
+      reunitarize.stat();
+      plaquette.stat();
+      polyakov.stat();
+      printf("Trajectory time: %.4f s\n\n", traj_timer.elapsed());
+    }
 
-    printf("\nPerformance statistics:\n");
-    heatbath.stat();
-    reunitarize.stat();
-    plaquette.stat();
-    polyakov.stat();
-    printf("Trajectory time: %.4f s\n\n", traj_timer.elapsed());
-
-    // Save configuration
-    if (traj > num_warmup && traj % save_interval == 0) {
+    if (traj > num_warmup && traj % save_interval == 0 && mpi_comm_rank() == 0) {
       std::string filename =
           save_prefix + "_cfg_" + std::to_string(traj) + ".bin";
-      // Note: save_gauge_binary is declared in io_gauge.cpp
-      // For now, just print a message
       printf("Would save configuration to: %s\n", filename.c_str());
     }
   }
 
   total_timer.stop();
-  printf("====================================\n");
-  printf("Total simulation time: %.4f s\n", total_timer.elapsed());
-  printf("====================================\n");
-
-  // Cleanup is automatic via RAII
+  if (mpi_comm_rank() == 0) {
+    printf("====================================\n");
+    printf("Total simulation time: %.4f s\n", total_timer.elapsed());
+    printf("====================================\n");
+  }
 }
 
 int main(int argc, char *argv[]) {
-  // Initialize Kokkos
+#ifdef KWQFT_USE_MPI
+  mpi_env_init(&argc, &argv);
+#endif
+
   Kokkos::initialize(argc, argv);
 
   {
-    // Initialize KWQFT
     kwqft::initialize(argc, argv);
 
-    // Parse command line arguments
-    if (argc != NDIMS + 3 && argc != NDIMS + 4) {
-      printf("Error: Expected %d or %d arguments, got %d\n", NDIMS + 2,
-             NDIMS + 3, argc - 1);
+    int proc_grid[NDIMS];
+    std::vector<std::string> pos;
+    if (!parse_geom_argv(argc, argv, proc_grid, pos)) {
+      fprintf(stderr, "Error: invalid -geom (need %d integers after -geom)\n",
+              NDIMS);
       print_usage(argv[0]);
       Kokkos::finalize();
+#ifdef KWQFT_USE_MPI
+      mpi_env_finalize();
+#endif
       return 1;
     }
 
-    // Parse lattice dimensions
+    const int npos = static_cast<int>(pos.size());
+    if (npos != NDIMS + 2 && npos != NDIMS + 3) {
+      fprintf(stderr, "Error: expected %d or %d positional args, got %d\n",
+              NDIMS + 2, NDIMS + 3, npos);
+      print_usage(argv[0]);
+      Kokkos::finalize();
+#ifdef KWQFT_USE_MPI
+      mpi_env_finalize();
+#endif
+      return 1;
+    }
+
     std::vector<int> lattice_size(NDIMS);
     for (int i = 0; i < NDIMS; ++i) {
-      lattice_size[i] = atoi(argv[i + 1]);
+      lattice_size[i] = std::atoi(pos[static_cast<size_t>(i)].c_str());
       if (lattice_size[i] <= 0) {
-        printf("Error: Invalid lattice dimension L%d = %d\n", i + 1,
-               lattice_size[i]);
+        fprintf(stderr, "Error: invalid lattice dimension L%d\n", i);
         Kokkos::finalize();
+#ifdef KWQFT_USE_MPI
+        mpi_env_finalize();
+#endif
         return 1;
       }
     }
 
-    // Parse beta and ntraj
-    double beta = atof(argv[NDIMS + 1]);
-    int ntraj = atoi(argv[NDIMS + 2]);
+    double beta = std::atof(pos[static_cast<size_t>(NDIMS)].c_str());
+    int ntraj = std::atoi(pos[static_cast<size_t>(NDIMS + 1)].c_str());
     double xi0 = 1.0;
-    if (argc == NDIMS + 4) {
-      xi0 = atof(argv[NDIMS + 3]);
+    if (npos == NDIMS + 3) {
+      xi0 = std::atof(pos[static_cast<size_t>(NDIMS + 2)].c_str());
     }
 
-    if (beta <= 0) {
-      printf("Error: Invalid beta = %f\n", beta);
+    if (beta <= 0.0 || ntraj <= 0 || xi0 <= 0.0) {
+      fprintf(stderr, "Error: invalid beta, ntraj, or xi0\n");
       Kokkos::finalize();
+#ifdef KWQFT_USE_MPI
+      mpi_env_finalize();
+#endif
       return 1;
     }
 
-    if (ntraj <= 0) {
-      printf("Error: Invalid ntraj = %d\n", ntraj);
-      Kokkos::finalize();
-      return 1;
+#ifdef KWQFT_USE_MPI
+    int global_lattice[NDIMS];
+    for (int d = 0; d < NDIMS; ++d) {
+      global_lattice[d] = lattice_size[d];
     }
-    if (xi0 <= 0.0) {
-      printf("Error: Invalid xi0 = %f\n", xi0);
-      Kokkos::finalize();
-      return 1;
+    if (mpi_comm_size() > 1) {
+      mpi_setup_cartesian(proc_grid, global_lattice);
+      std::vector<int> pg(proc_grid, proc_grid + NDIMS);
+      initializeParamsDistributed(lattice_size, pg, beta, true, xi0);
+    } else {
+      initializeParams(lattice_size, beta, true, xi0);
+    }
+#else
+    initializeParams(lattice_size, beta, true, xi0);
+#endif
+
+    if (mpi_comm_rank() == 0) {
+      printf("Starting SU(%d) heatbath simulation\n", NCOLORS);
+      printf("Beta: %f\n", beta);
+      printf("Number of trajectories: %d\n", ntraj);
+      printf("Xi0 (bare anisotropy): %f\n", xi0);
+      printf("\n");
     }
 
-    // Print configuration
-    printf("Starting SU(%d) heatbath simulation\n", NCOLORS);
-    printf("Lattice: ");
-    for (int i = 0; i < NDIMS; ++i) {
-      printf("%d", lattice_size[i]);
-      if (i < NDIMS - 1)
-        printf(" x ");
-    }
-    printf("\n");
-    printf("Beta: %f\n", beta);
-    printf("Number of trajectories: %d\n", ntraj);
-    printf("Xi0 (bare anisotropy): %f\n", xi0);
-    printf("\n");
-
-    // Run simulation with double precision
-    run_heatbath<double>(lattice_size, beta, ntraj, xi0);
+    run_heatbath<double>(ntraj);
 
     kwqft::finalize();
   }
 
   Kokkos::finalize();
+#ifdef KWQFT_USE_MPI
+  mpi_env_finalize();
+#endif
   return 0;
 }

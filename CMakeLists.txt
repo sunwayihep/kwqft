@@ -19,6 +19,8 @@ option(KWQFT_ENABLE_OPENMP "Enable OpenMP backend" OFF)
 option(KWQFT_ENABLE_CUDA "Enable CUDA backend" OFF)
 option(KWQFT_ENABLE_HIP "Enable HIP backend" OFF)
 option(KWQFT_ENABLE_SYCL "Enable SYCL backend" OFF)
+option(KWQFT_STAPLE_TWO_PHASE "Batched shift caches for staples (MPI-oriented; higher memory)" OFF)
+option(KWQFT_USE_MPI "MPI parallel build (halo hooks; link MPI if ON)" OFF)
 
 # Lattice parameters (can be overridden at compile time)
 set(KWQFT_NCOLORS "3" CACHE STRING "Number of colors for SU(N)")
@@ -115,11 +117,26 @@ set(KWQFT_SOURCES
     src/polyakov.cpp
     src/reunitarize.cpp
     src/io_gauge.cpp
+    src/mpi_layout.cpp
 )
+
+if(KWQFT_USE_MPI)
+    list(APPEND KWQFT_SOURCES src/gauge_halo.cpp)
+endif()
 
 # Create library
 add_library(kwqft ${KWQFT_SOURCES})
 target_link_libraries(kwqft PUBLIC Kokkos::kokkos)
+
+if(KWQFT_STAPLE_TWO_PHASE)
+    target_compile_definitions(kwqft PUBLIC KWQFT_STAPLE_TWO_PHASE=1)
+endif()
+
+if(KWQFT_USE_MPI)
+    find_package(MPI REQUIRED COMPONENTS CXX)
+    target_link_libraries(kwqft PUBLIC MPI::MPI_CXX)
+    target_compile_definitions(kwqft PUBLIC KWQFT_USE_MPI=1)
+endif()
 
 # Link KokkosKernels if available
 if(HAVE_KOKKOS_KERNELS AND TARGET Kokkos::kokkoskernels)
@@ -153,6 +170,8 @@ message(STATUS "  OpenMP: ${KWQFT_ENABLE_OPENMP}")
 message(STATUS "  CUDA: ${KWQFT_ENABLE_CUDA}")
 message(STATUS "  HIP: ${KWQFT_ENABLE_HIP}")
 message(STATUS "  SYCL: ${KWQFT_ENABLE_SYCL}")
+message(STATUS "  Staple two-phase (batched shift): ${KWQFT_STAPLE_TWO_PHASE}")
+message(STATUS "  MPI: ${KWQFT_USE_MPI}")
 if(KOKKOS_SOURCE_DIR)
     message(STATUS "  Kokkos source: ${KOKKOS_SOURCE_DIR}")
 endif()

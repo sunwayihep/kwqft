@@ -10,9 +10,15 @@
 #define KWQFT_MONTE_HPP
 
 #include "complex.hpp"
+#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
+#include <memory>
+#include "staple_shift_workspace.hpp"
+#endif
 #include "constants.hpp"
 #include "gauge_array.hpp"
+#include "gauge_halo.hpp"
 #include "index.hpp"
+#include "neighbor_access.hpp"
 #include "shift.hpp"
 #include "kwqft_common.hpp"
 #include "matrixsun.hpp"
@@ -28,19 +34,19 @@ namespace kwqft {
 /**
  * @brief Calculate staple at a given site and direction
  *
- * Uses QDP/Chroma-style \ref shift_eo (QDP: \c dest(x)=src(x+e_mu) for
- * \c shift(src, FORWARD, mu)) to fetch links. The matrix product order matches
- * the MILC-style upper/lower paths used previously in KWQFT (equivalent plaquette
- * to Chroma’s \c PlaqGaugeAct::staple up to a cyclic rewrite of the loop).
+ * Site-based link gather: periodic torus when \c halo is null; MPI subdomain
+ * with \ref GaugeHaloDevice when \c params.mpi and \c halo non-null.
  */
 template <typename Real>
 KOKKOS_INLINE_FUNCTION MatrixSun<Real, NCOLORS>
-calculateStaple(const Complex<Real> *gaugePtr, int64_t id, int oddbit, int mu,
-                int64_t soa_stride, const LatticeParams &params) {
+calculateStaple(const Complex<Real> *gaugePtr, int64_t soa_stride,
+                const GaugeHaloDevice<Real> *halo, int64_t id, int oddbit,
+                int mu, const LatticeParams &params) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
 
   MatrixT staple = MatrixT::zero();
-  const int64_t idx_eo = id + oddbit * params.half_volume;
+  int x[NDIMS];
+  eo_to_coords(id, oddbit, x, params);
 
   MatrixT u_nu_x, u_mu_x_plus_nu, u_nu_x_plus_mu, tmp;
 
@@ -50,26 +56,40 @@ calculateStaple(const Complex<Real> *gaugePtr, int64_t id, int oddbit, int mu,
 
     const Real coeff = static_cast<Real>(params.coeffs[mu][nu]);
 
-    // Upper: U_nu(x) * U_mu(x+nu) * U_nu^dag(x+mu)
-    loadGaugeLinkSoa(gaugePtr, idx_eo, nu, soa_stride, params, u_nu_x);
-    loadGaugeLinkSoa(gaugePtr, shift_eo(idx_eo, nu, SHIFT_FORWARD, params), mu,
-                     soa_stride, params, u_mu_x_plus_nu);
-    loadGaugeLinkSoa(gaugePtr, shift_eo(idx_eo, mu, SHIFT_FORWARD, params), nu,
-                     soa_stride, params, u_nu_x_plus_mu);
+    int xa[NDIMS], xb[NDIMS], xc[NDIMS], xm[NDIMS], xz[NDIMS];
+    for (int d = 0; d < NDIMS; ++d) {
+      xa[d] = x[d];
+    }
+    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xa, nu, params, u_nu_x);
+    for (int d = 0; d < NDIMS; ++d) {
+      xb[d] = x[d];
+    }
+    xb[nu]++;
+    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xb, mu, params,
+                          u_mu_x_plus_nu);
+    for (int d = 0; d < NDIMS; ++d) {
+      xc[d] = x[d];
+    }
+    xc[mu]++;
+    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xc, nu, params,
+                          u_nu_x_plus_mu);
     tmp = u_nu_x * u_mu_x_plus_nu * u_nu_x_plus_mu.dagger();
     staple += tmp * coeff;
 
-    // Lower: U_nu^dag(x-nu) * U_mu(x-nu) * U_nu(x+mu-nu)
-    const int64_t idx_x_minus_nu =
-        shift_eo(idx_eo, nu, SHIFT_BACKWARD, params);
-    loadGaugeLinkSoa(gaugePtr, idx_x_minus_nu, nu, soa_stride, params, u_nu_x);
-    loadGaugeLinkSoa(gaugePtr, idx_x_minus_nu, mu, soa_stride, params,
-                     u_mu_x_plus_nu);
-    loadGaugeLinkSoa(
-        gaugePtr,
-        shift_eo(shift_eo(idx_eo, mu, SHIFT_FORWARD, params), nu,
-                 SHIFT_BACKWARD, params),
-        nu, soa_stride, params, u_nu_x_plus_mu);
+    for (int d = 0; d < NDIMS; ++d) {
+      xm[d] = x[d];
+    }
+    xm[nu]--;
+    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xm, nu, params, u_nu_x);
+    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xm, mu, params,
+                          u_mu_x_plus_nu);
+    for (int d = 0; d < NDIMS; ++d) {
+      xz[d] = x[d];
+    }
+    xz[mu]++;
+    xz[nu]--;
+    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xz, nu, params,
+                          u_nu_x_plus_mu);
     tmp = u_nu_x.dagger() * u_mu_x_plus_nu * u_nu_x_plus_mu;
     staple += tmp * coeff;
   }
@@ -258,12 +278,23 @@ private:
   GaugeT &gauge_;
   RandomGenerator &rng_;
   LatticeParams params_;
+  GaugeHaloBuffers<Real> *halo_;
   double time_;
   int64_t size_;
+#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
+  std::unique_ptr<StapleShiftWorkspace<Real>> staple_workspace_;
+#endif
 
 public:
-  HeatBath(GaugeT &gauge, RandomGenerator &rng, const LatticeParams &params)
-      : gauge_(gauge), rng_(rng), params_(params), time_(0.0) {
+  HeatBath(GaugeT &gauge, RandomGenerator &rng, const LatticeParams &params,
+         GaugeHaloBuffers<Real> *halo = nullptr)
+      : gauge_(gauge), rng_(rng), params_(params), halo_(halo), time_(0.0)
+#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
+        ,
+        staple_workspace_(
+            std::make_unique<StapleShiftWorkspace<Real>>(params))
+#endif
+  {
     size_ = params.half_volume;
   }
 
@@ -284,6 +315,20 @@ public:
     for (int parity = 0; parity < 2; ++parity) {
       // Loop over directions
       for (int mu = 0; mu < NDIMS; ++mu) {
+        if (halo_ && params.mpi) {
+          halo_->exchange(gaugeView.data(), size, params);
+        }
+        GaugeHaloDevice<Real> halo_dev =
+            (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
+        const GaugeHaloDevice<Real> *halo_ptr =
+            (params.mpi && halo_) ? &halo_dev : nullptr;
+#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
+        StapleShiftCachePointers<Real> staple_cache{};
+        if (!params.mpi) {
+          staple_workspace_->rebuild(gaugeView.data(), size, params);
+          staple_cache = staple_workspace_->cache_pointers();
+        }
+#endif
         Kokkos::parallel_for(
             "HeatBath", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
@@ -293,8 +338,19 @@ public:
               ComplexT *gaugePtr = gaugeView.data();
 
               // Calculate staple (sum of neighboring plaquettes)
-              MatrixT staple = calculateStaple<Real>(gaugePtr, id, parity, mu,
-                                                     size, params);
+#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
+              MatrixT staple;
+              if (!params.mpi) {
+                staple = calculateStapleTwoPhase<Real>(
+                    gaugePtr, size, staple_cache, id, parity, mu, params);
+              } else {
+                staple = calculateStaple<Real>(gaugePtr, size, halo_ptr, id,
+                                               parity, mu, params);
+              }
+#else
+              MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_ptr,
+                                                     id, parity, mu, params);
+#endif
 
               // Get current link index
               int64_t idxoddbit = id + parity * halfVol;
@@ -408,11 +464,23 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
+  GaugeHaloBuffers<Real> *halo_;
   double time_;
+#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
+  std::unique_ptr<StapleShiftWorkspace<Real>> staple_workspace_;
+#endif
 
 public:
-  Overrelaxation(GaugeT &gauge, const LatticeParams &params)
-      : gauge_(gauge), params_(params), time_(0.0) {}
+  Overrelaxation(GaugeT &gauge, const LatticeParams &params,
+                 GaugeHaloBuffers<Real> *halo = nullptr)
+      : gauge_(gauge), params_(params), halo_(halo), time_(0.0)
+#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
+        ,
+        staple_workspace_(
+            std::make_unique<StapleShiftWorkspace<Real>>(params))
+#endif
+  {
+  }
 
   /**
    * @brief Run one sweep of overrelaxation
@@ -427,13 +495,38 @@ public:
 
     for (int parity = 0; parity < 2; ++parity) {
       for (int mu = 0; mu < NDIMS; ++mu) {
+        if (halo_ && params.mpi) {
+          halo_->exchange(gaugeView.data(), size, params);
+        }
+        GaugeHaloDevice<Real> halo_dev =
+            (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
+        const GaugeHaloDevice<Real> *halo_ptr =
+            (params.mpi && halo_) ? &halo_dev : nullptr;
+#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
+        StapleShiftCachePointers<Real> staple_cache{};
+        if (!params.mpi) {
+          staple_workspace_->rebuild(gaugeView.data(), size, params);
+          staple_cache = staple_workspace_->cache_pointers();
+        }
+#endif
         Kokkos::parallel_for(
             "Overrelaxation", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
               ComplexT *gaugePtr = gaugeView.data();
 
-              MatrixT staple = calculateStaple<Real>(gaugePtr, id, parity, mu,
-                                                     size, params);
+#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
+              MatrixT staple;
+              if (!params.mpi) {
+                staple = calculateStapleTwoPhase<Real>(
+                    gaugePtr, size, staple_cache, id, parity, mu, params);
+              } else {
+                staple = calculateStaple<Real>(gaugePtr, size, halo_ptr, id,
+                                               parity, mu, params);
+              }
+#else
+              MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_ptr,
+                                                     id, parity, mu, params);
+#endif
 
               int64_t idxoddbit = id + parity * halfVol;
               int64_t muvolume = mu * params.volume;

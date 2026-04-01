@@ -40,6 +40,14 @@ struct LatticeParams {
 
   bool use_texture; // Use texture memory (for CUDA)
 
+  /// Domain decomposition (MPI): when false, grid[] is the full lattice (periodic).
+  bool mpi{false};
+  int global_grid[NDIMS]; // Global lattice (user-specified sizes)
+  int proc_grid[NDIMS];   // MPI process grid (1 if not using MPI)
+  int coord[NDIMS];       // This rank's Cartesian coordinates
+  int rank{0};
+  int nproc{1};
+
   // Default constructor
   KOKKOS_INLINE_FUNCTION
   LatticeParams()
@@ -50,6 +58,9 @@ struct LatticeParams {
       grid[i] = 0;
       grid_with_ghost[i] = 0;
       border[i] = 0;
+      global_grid[i] = 0;
+      proc_grid[i] = 1;
+      coord[i] = 0;
       for (int j = 0; j < NDIMS; ++j) {
         coeffs[i][j] = (i == j) ? 0.0 : 1.0;
       }
@@ -86,6 +97,14 @@ struct LatticeParams {
     beta = _beta;
     beta_over_nc = beta / static_cast<double>(NCOLORS);
     xi0 = _xi0;
+    mpi = false;
+    rank = 0;
+    nproc = 1;
+    for (int i = 0; i < NDIMS; ++i) {
+      global_grid[i] = grid[i];
+      proc_grid[i] = 1;
+      coord[i] = 0;
+    }
 
     // Wilson anisotropic plaquette convention:
     // spatial-spatial: beta/xi0, spatial-temporal: beta*xi0.
@@ -146,6 +165,19 @@ ParamsHostView &get_host_params_mirror();
  */
 void initializeParams(const std::vector<int> &lattice_size, double beta,
                       bool verbose = true, double xi0 = 1.0);
+
+/**
+ * @brief Initialize parameters for MPI domain decomposition.
+ *
+ * @param global_lattice Full lattice sizes L[0]..L[NDIMS-1]
+ * @param proc_grid      Process counts p[0]..p[NDIMS-1] (product = MPI size)
+ * @param beta           Coupling
+ * @param verbose        Print parameters on rank 0
+ * @param xi0            Anisotropy (same as \ref initializeParams)
+ */
+void initializeParamsDistributed(const std::vector<int> &global_lattice,
+                                 const std::vector<int> &proc_grid, double beta,
+                                 bool verbose = true, double xi0 = 1.0);
 
 /**
  * @brief Copy parameters to device memory
