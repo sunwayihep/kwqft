@@ -10,6 +10,7 @@
 #include "constants.hpp"
 #include "neighbor_access.hpp"
 #include "kwqft_common.hpp"
+#include <vector>
 
 namespace kwqft {
 
@@ -27,11 +28,11 @@ public:
 private:
   LatticeParams p_{};
   int64_t mat_elems_{0};
-  std::vector<int64_t> face_vol_;
-  Kokkos::View<ComplexT *, Kokkos::LayoutRight, DefaultMemSpace> d_recv_m_[NDIMS];
-  Kokkos::View<ComplexT *, Kokkos::LayoutRight, DefaultMemSpace> d_recv_p_[NDIMS];
-  Kokkos::View<ComplexT *, Kokkos::HostSpace> h_send_[NDIMS];
-  Kokkos::View<ComplexT *, Kokkos::HostSpace> h_recv_[NDIMS];
+  std::vector<int64_t> halo_vol_;
+  std::vector<Kokkos::View<ComplexT *, Kokkos::LayoutRight, DefaultMemSpace>>
+      d_recv_;
+  std::vector<Kokkos::View<ComplexT *, Kokkos::HostSpace>> h_send_;
+  std::vector<Kokkos::View<ComplexT *, Kokkos::HostSpace>> h_recv_;
 };
 
 } // namespace kwqft

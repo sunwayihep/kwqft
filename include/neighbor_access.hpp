@@ -7,14 +7,46 @@
 #define KWQFT_NEIGHBOR_ACCESS_HPP
 
 #include "constants.hpp"
+#include "index.hpp"
 #include "matrixsun.hpp"
 #include "shift.hpp"
 
 namespace kwqft {
 
+constexpr int halo_pow3_constexpr(int n) { return (n <= 0) ? 1 : 3 * halo_pow3_constexpr(n - 1); }
+constexpr int HALO_CODE_COUNT = halo_pow3_constexpr(NDIMS);
+constexpr int HALO_CENTER_CODE = (HALO_CODE_COUNT - 1) / 2;
+
+KOKKOS_INLINE_FUNCTION int halo_offset_to_code(const int off[NDIMS]) {
+  int code = 0;
+  int mult = 1;
+  for (int d = 0; d < NDIMS; ++d) {
+    code += (off[d] + 1) * mult;
+    mult *= 3;
+  }
+  return code;
+}
+
+KOKKOS_INLINE_FUNCTION void halo_code_to_offset(int code, int off[NDIMS]) {
+  int t = code;
+  for (int d = 0; d < NDIMS; ++d) {
+    const int digit = t % 3;
+    off[d] = digit - 1;
+    t /= 3;
+  }
+}
+
+KOKKOS_INLINE_FUNCTION int64_t halo_region_volume(const int off[NDIMS],
+                                                  const LatticeParams &p) {
+  int64_t vol = 1;
+  for (int d = 0; d < NDIMS; ++d) {
+    vol *= (off[d] == 0) ? static_cast<int64_t>(p.grid[d]) : 1LL;
+  }
+  return vol;
+}
+
 template <typename Real> struct GaugeHaloDevice {
-  const Complex<Real> *recv_m[NDIMS]{};
-  const Complex<Real> *recv_p[NDIMS]{};
+  const Complex<Real> *recv[HALO_CODE_COUNT]{};
 };
 
 KOKKOS_INLINE_FUNCTION void eo_to_coords(int64_t id, int oddbit, int x[NDIMS],
@@ -86,9 +118,12 @@ face_idx_tangential(const int x[NDIMS], int mu, const LatticeParams &p) {
 
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
-loadGhostFaceLink(const GaugeHaloDevice<Real> &h, int mu_bnd, bool plus_face,
-                  int64_t face_idx, int dir, MatrixSun<Real, NCOLORS> &U) {
-  const Complex<Real> *buf = plus_face ? h.recv_p[mu_bnd] : h.recv_m[mu_bnd];
+loadGhostFaceLink(const Complex<Real> *buf, int64_t face_idx, int dir,
+                  MatrixSun<Real, NCOLORS> &U) {
+  if (buf == nullptr) {
+    U = MatrixSun<Real, NCOLORS>::zero();
+    return;
+  }
   const int64_t me = static_cast<int64_t>(NCOLORS * NCOLORS);
   const int64_t off = (face_idx * NDIMS + dir) * me;
   for (int i = 0; i < NCOLORS; ++i) {
@@ -142,30 +177,36 @@ loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
     U = MatrixSun<Real, NCOLORS>::zero();
     return;
   }
-
-  for (int mu = 0; mu < NDIMS; ++mu) {
-    if (x[mu] < 0) {
-      int xc[NDIMS];
-      for (int d = 0; d < NDIMS; ++d) {
-        xc[d] = x[d];
-      }
-      xc[mu] = 0;
-      const int64_t face_idx = face_idx_tangential(xc, mu, p);
-      loadGhostFaceLink(*halo, mu, false, face_idx, dir, U);
-      return;
-    }
-    if (x[mu] >= p.grid[mu]) {
-      int xc[NDIMS];
-      for (int d = 0; d < NDIMS; ++d) {
-        xc[d] = x[d];
-      }
-      xc[mu] = p.grid[mu] - 1;
-      const int64_t face_idx = face_idx_tangential(xc, mu, p);
-      loadGhostFaceLink(*halo, mu, true, face_idx, dir, U);
-      return;
+  int off[NDIMS];
+  int xw[NDIMS];
+  for (int d = 0; d < NDIMS; ++d) {
+    if (x[d] < 0) {
+      off[d] = -1;
+      xw[d] = p.grid[d] - 1;
+    } else if (x[d] >= p.grid[d]) {
+      off[d] = +1;
+      xw[d] = 0;
+    } else {
+      off[d] = 0;
+      xw[d] = x[d];
     }
   }
-  U = MatrixSun<Real, NCOLORS>::zero();
+
+  const int code = halo_offset_to_code(off);
+  const Complex<Real> *buf = halo->recv[code];
+  if (buf == nullptr) {
+    U = MatrixSun<Real, NCOLORS>::zero();
+    return;
+  }
+
+  int64_t region_idx = 0;
+  int64_t mult = 1;
+  for (int d = 0; d < NDIMS; ++d) {
+    const int c = (off[d] == 0) ? xw[d] : 0;
+    region_idx += static_cast<int64_t>(c) * mult;
+    mult *= (off[d] == 0) ? static_cast<int64_t>(p.grid[d]) : 1LL;
+  }
+  loadGhostFaceLink(buf, region_idx, dir, U);
 }
 
 } // namespace kwqft

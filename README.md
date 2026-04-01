@@ -107,6 +107,7 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 | `KWQFT_ENABLE_CUDA` | Enable CUDA backend | OFF |
 | `KWQFT_ENABLE_HIP` | Enable HIP backend | OFF |
 | `KWQFT_ENABLE_SYCL` | Enable SYCL backend | OFF |
+| `KWQFT_USE_MPI` | Enable MPI build and `-geom` domain decomposition | OFF |
 | `KWQFT_NCOLORS` | N value for SU(N) | 3 |
 | `KWQFT_NDIMS` | Spacetime dimensions | 4 |
 
@@ -129,6 +130,76 @@ Parameter description:
 When `xi0 != 1`, the code uses anisotropic Wilson plaquette weights:
 - spatial-spatial plaquettes: `beta / xi0`
 - spatial-temporal plaquettes: `beta * xi0`
+
+### MPI Support (`-geom`)
+
+Build with MPI enabled:
+
+```bash
+mkdir build_mpi && cd build_mpi
+cmake .. -DCMAKE_BUILD_TYPE=Release \
+      -DKWQFT_USE_MPI=ON \
+      -DKOKKOS_SOURCE_DIR=/path/to/kokkos
+make -j
+```
+
+MPI run format:
+
+```bash
+# mpirun -np P ./heatbath -geom p0 p1 ... p{NDIMS-1} L0 L1 ... L{NDIMS-1} beta ntraj [xi0]
+```
+
+Rules:
+- `p0 * p1 * ... * p{NDIMS-1} == P`
+- each global size `L[d]` must be divisible by `p[d]`
+- local subdomain on each rank is `L[d] / p[d]`
+
+Example (4D):
+
+```bash
+mpirun -np 8 ./heatbath -geom 2 2 2 1 4 4 4 8 6.0 10
+```
+
+This means global lattice `4x4x4x8`, process grid `2x2x2x1`, and each rank owns local lattice `2x2x2x8`.
+
+### Hybrid MPI + OpenMP
+
+Build OpenMP + MPI:
+
+```bash
+mkdir build_mpi_omp && cd build_mpi_omp
+cmake .. -DCMAKE_BUILD_TYPE=Release \
+      -DKWQFT_ENABLE_OPENMP=ON \
+      -DKWQFT_USE_MPI=ON \
+      -DKOKKOS_SOURCE_DIR=/path/to/kokkos
+make -j
+```
+
+Recommended runtime binding:
+
+```bash
+export OMP_PROC_BIND=spread
+export OMP_PLACES=cores
+```
+
+Use `PE=<threads-per-rank>` so each MPI rank gets enough CPU cores:
+
+```bash
+# 4 MPI ranks x 2 OpenMP threads = 8 cores
+OMP_NUM_THREADS=2 mpirun -np 4 \
+  --map-by slot:PE=2 --bind-to core --report-bindings \
+  ./heatbath -geom 4 1 1 1 24 24 24 96 6.0 10 5.0
+
+# 2 MPI ranks x 4 OpenMP threads = 8 cores
+OMP_NUM_THREADS=4 mpirun -np 2 \
+  --map-by slot:PE=4 --bind-to core --report-bindings \
+  ./heatbath -geom 2 1 1 1 24 24 24 96 6.0 10 5.0
+```
+
+Notes:
+- `--map-by slot:PE=n` asks Open MPI to reserve `n` processing elements per rank.
+- `--bind-to core` binds each rank to cores; OpenMP threads then run inside that core set.
+- `--report-bindings` prints actual CPU binding and is useful for checking whether threads are spread as expected.
 
 ### Running Tests
 
