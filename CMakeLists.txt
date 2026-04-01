@@ -118,11 +118,8 @@ set(KWQFT_SOURCES
     src/reunitarize.cpp
     src/io_gauge.cpp
     src/mpi_layout.cpp
+    src/gauge_halo.cpp
 )
-
-if(KWQFT_USE_MPI)
-    list(APPEND KWQFT_SOURCES src/gauge_halo.cpp)
-endif()
 
 # Create library
 add_library(kwqft ${KWQFT_SOURCES})
