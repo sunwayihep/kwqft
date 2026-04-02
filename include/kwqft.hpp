@@ -44,12 +44,14 @@ inline void initialize(int argc = 0, char *argv[] = nullptr) {
   Kokkos::initialize(argc, argv);
 
   // Print library info
-  printf("==========================================================\n");
-  printf("KWQFT - Kokkos Ken Wilson Quantum Field Theory Library\n");
-  printf("SU(%d) gauge theory in %d dimensions\n", NCOLORS, NDIMS);
-  printf("Execution space: %s\n", typeid(DefaultExecSpace).name());
-  printf("Memory space: %s\n", typeid(DefaultMemSpace).name());
-  printf("==========================================================\n");
+  if (mpi_comm_rank() == 0) {
+    printf("==========================================================\n");
+    printf("KWQFT - Kokkos Ken Wilson Quantum Field Theory Library\n");
+    printf("SU(%d) gauge theory in %d dimensions\n", NCOLORS, NDIMS);
+    printf("Execution space: %s\n", typeid(DefaultExecSpace).name());
+    printf("Memory space: %s\n", typeid(DefaultMemSpace).name());
+    printf("==========================================================\n");
+  }
 }
 
 /**
@@ -61,9 +63,11 @@ inline void initialize(int argc = 0, char *argv[] = nullptr) {
 inline void finalize() {
   // Release Kokkos views before Kokkos::finalize()
   finalizeParams();
-  printf("==========================================================\n");
-  printf("KWQFT finalized\n");
-  printf("==========================================================\n");
+  if (mpi_comm_rank() == 0) {
+    printf("==========================================================\n");
+    printf("KWQFT finalized\n");
+    printf("==========================================================\n");
+  }
 
 #ifdef KWQFT_USE_MPI
   mpi_env_finalize();
