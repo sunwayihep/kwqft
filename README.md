@@ -73,12 +73,20 @@ cmake .. -DCMAKE_BUILD_TYPE=Release \
 make -j
 ```
 
-Supported GPU architecture options:
+
+The full list of `Kokkos_ARCH_*` flags for **CPU** (AMD, ARM, IBM, Intel, RISC-V) and **GPU** (NVIDIA, AMD, Intel, etc.) is maintained in the Kokkos documentation — see the **Architectures** section of the [Kokkos Configuration Guide](https://kokkos.org/kokkos-core-wiki/get-started/configuration-guide.html). Choose the flag that matches your hardware and pass e.g. `-DKokkos_ARCH_AMPERE86=ON` to CMake.
+
+Common NVIDIA GPU examples (not exhaustive):
+
 - `-DKokkos_ARCH_VOLTA70=ON` (V100)
 - `-DKokkos_ARCH_TURING75=ON` (T4, RTX 20xx)
 - `-DKokkos_ARCH_AMPERE80=ON` (A100)
-- `-DKokkos_ARCH_AMPERE86=ON` (RTX 30xx)
+- `-DKokkos_ARCH_AMPERE86=ON` (A40, RTX 30xx)
 - `-DKokkos_ARCH_HOPPER90=ON` (H100)
+- `-DKokkos_ARCH_BLACKWELL100=ON` (B100)
+- `-DKokkos_ARCH_BLACKWELL120=ON` (RTX 50xx)
+
+If you enable `KWQFT_ENABLE_CUDA=ON` but do not set any `Kokkos_ARCH_*` option, KWQFT’s CMake defaults to `Kokkos_ARCH_AMPERE80`; override using the guide above.
 
 ### AMD GPU Version (HIP)
 

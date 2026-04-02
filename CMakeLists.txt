@@ -35,10 +35,22 @@ if(KWQFT_ENABLE_CUDA)
     set(Kokkos_ENABLE_CUDA ON CACHE BOOL "")
     set(Kokkos_ENABLE_CUDA_LAMBDA ON CACHE BOOL "")
     set(Kokkos_ENABLE_CUDA_CONSTEXPR ON CACHE BOOL "")
-    # Set architecture - can be overridden via -DKokkos_ARCH_XXX=ON
-    if(NOT DEFINED Kokkos_ARCH_AMPERE80 AND NOT DEFINED Kokkos_ARCH_VOLTA70 AND 
-       NOT DEFINED Kokkos_ARCH_TURING75 AND NOT DEFINED Kokkos_ARCH_HOPPER90)
-        set(Kokkos_ARCH_AMPERE80 ON CACHE BOOL "Default GPU architecture")
+    # GPU arch (Kokkos): scan CACHE_VARIABLES for Kokkos_ARCH_* ; enable default only if none is ON.
+    get_property(_kwqft_cache_vars DIRECTORY PROPERTY CACHE_VARIABLES)
+    set(_kwqft_any_kokkos_arch FALSE)
+    foreach(_kwqft_v ${_kwqft_cache_vars})
+        if(_kwqft_v MATCHES "^Kokkos_ARCH_")
+            get_property(_kwqft_arch_val CACHE ${_kwqft_v} PROPERTY VALUE)
+            if(_kwqft_arch_val)
+                set(_kwqft_any_kokkos_arch TRUE)
+                break()
+            endif()
+        endif()
+    endforeach()
+    if(NOT _kwqft_any_kokkos_arch)
+        message(STATUS "KWQFT: no Kokkos_ARCH_* enabled; defaulting Kokkos_ARCH_AMPERE80=ON (override with -DKokkos_ARCH_<name>=ON)")
+        set(Kokkos_ARCH_AMPERE80 ON CACHE BOOL
+            "Default GPU architecture (set any Kokkos_ARCH_*=ON to override)" FORCE)
     endif()
 endif()
 
