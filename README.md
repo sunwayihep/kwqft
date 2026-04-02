@@ -124,16 +124,16 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 ### Generating Gauge Field Configurations
 
 ```bash
-# Format: ./heatbath L1 L2 L3 L4 beta ntraj [xi0]
-./heatbath 8 8 8 16 6.0 1000
-./heatbath 8 8 8 16 6.0 1000 2.0
+# Format: ./heatbath -latt L0 ... L{NDIMS-1} -beta beta -ntraj ntraj [-xi0 xi0] [-geom p0 ... p{NDIMS-1}]
+./heatbath -latt 8 8 8 16 -beta 6.0 -ntraj 1000
+./heatbath -beta 6.0 -ntraj 1000 -latt 8 8 8 16 -xi0 2.0
 ```
 
 Parameter description:
-- `L1 L2 L3 L4`: Lattice dimensions (x, y, z, t)
-- `beta`: Gauge coupling constant
-- `ntraj`: Number of trajectories
-- `xi0`: Bare anisotropy (optional, default `1.0`)
+- `-latt`: Global lattice dimensions (`NDIMS` integers, e.g. x, y, z, t in 4D)
+- `-beta`: Gauge coupling constant
+- `-ntraj`: Number of trajectories
+- `-xi0`: Bare anisotropy (optional, default `1.0`)
 
 When `xi0 != 1`, the code uses anisotropic Wilson plaquette weights:
 - spatial-spatial plaquettes: `beta / xi0`
@@ -154,7 +154,7 @@ make -j
 MPI run format:
 
 ```bash
-# mpirun -np P ./heatbath -geom p0 p1 ... p{NDIMS-1} L0 L1 ... L{NDIMS-1} beta ntraj [xi0]
+# mpirun -np P ./heatbath -geom p0 ... p{NDIMS-1} -latt L0 ... L{NDIMS-1} -beta beta -ntraj ntraj [-xi0 xi0]
 ```
 
 Rules:
@@ -165,7 +165,7 @@ Rules:
 Example (4D):
 
 ```bash
-mpirun -np 8 ./heatbath -geom 2 2 2 1 4 4 4 8 6.0 10
+mpirun -np 8 ./heatbath -geom 2 2 2 1 -latt 4 4 4 8 -beta 6.0 -ntraj 10
 ```
 
 This means global lattice `4x4x4x8`, process grid `2x2x2x1`, and each rank owns local lattice `2x2x2x8`.
@@ -196,12 +196,12 @@ Use `PE=<threads-per-rank>` so each MPI rank gets enough CPU cores:
 # 4 MPI ranks x 2 OpenMP threads = 8 cores
 OMP_NUM_THREADS=2 mpirun -np 4 \
   --map-by slot:PE=2 --bind-to core --report-bindings \
-  ./heatbath -geom 4 1 1 1 24 24 24 96 6.0 10 5.0
+  ./heatbath -geom 4 1 1 1 -latt 24 24 24 96 -beta 6.0 -ntraj 10 -xi0 5.0
 
 # 2 MPI ranks x 4 OpenMP threads = 8 cores
 OMP_NUM_THREADS=4 mpirun -np 2 \
   --map-by slot:PE=4 --bind-to core --report-bindings \
-  ./heatbath -geom 2 1 1 1 24 24 24 96 6.0 10 5.0
+  ./heatbath -geom 2 1 1 1 -latt 24 24 24 96 -beta 6.0 -ntraj 10 -xi0 5.0
 ```
 
 Notes:
@@ -241,6 +241,7 @@ kokkos_src/
 │   ├── polyakov.cpp        # Polyakov loop measurement
 │   ├── reunitarize.cpp     # Reunitarization
 │   ├── io_gauge.cpp        # Configuration I/O
+├── main/
 │   └── heatbath_main.cpp   # Main program
 └── test/
     └── test_main.cpp       # Test program
