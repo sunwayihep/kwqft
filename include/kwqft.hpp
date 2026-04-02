@@ -11,6 +11,12 @@
 #ifndef KWQFT_HPP
 #define KWQFT_HPP
 
+#include <Kokkos_Core.hpp>
+
+#ifdef KWQFT_USE_MPI
+#include "mpi_layout.hpp"
+#endif
+
 #include "complex.hpp"
 #include "constants.hpp"
 #include "gauge_array.hpp"
@@ -27,10 +33,16 @@ namespace kwqft {
 /**
  * @brief Initialize KWQFT library
  *
- * This should be called after Kokkos::initialize() and before
- * any KWQFT operations
+ * This function also takes care of `Kokkos::initialize()` and (when built
+ * with MPI) `mpi_env_init()`, so main() can stay compact.
  */
 inline void initialize(int argc = 0, char *argv[] = nullptr) {
+#ifdef KWQFT_USE_MPI
+  mpi_env_init(&argc, &argv);
+#endif
+
+  Kokkos::initialize(argc, argv);
+
   // Print library info
   printf("==========================================================\n");
   printf("KWQFT - Kokkos Ken Wilson Quantum Field Theory Library\n");
@@ -43,7 +55,8 @@ inline void initialize(int argc = 0, char *argv[] = nullptr) {
 /**
  * @brief Finalize KWQFT library
  *
- * Call before Kokkos::finalize()
+ * This function calls `finalizeParams()`, then (when built with MPI)
+ * `mpi_env_finalize()`, and finally `Kokkos::finalize()`.
  */
 inline void finalize() {
   // Release Kokkos views before Kokkos::finalize()
@@ -51,6 +64,12 @@ inline void finalize() {
   printf("==========================================================\n");
   printf("KWQFT finalized\n");
   printf("==========================================================\n");
+
+#ifdef KWQFT_USE_MPI
+  mpi_env_finalize();
+#endif
+
+  Kokkos::finalize();
 }
 
 /**
