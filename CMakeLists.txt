@@ -150,7 +150,7 @@ if(HAVE_KOKKOS_KERNELS AND TARGET Kokkos::kokkoskernels)
 endif()
 
 # Main executable
-add_executable(heatbath src/heatbath_main.cpp)
+add_executable(heatbath main/heatbath_main.cpp)
 target_link_libraries(heatbath kwqft)
 
 # Test executable
