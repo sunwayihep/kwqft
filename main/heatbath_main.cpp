@@ -5,9 +5,9 @@
  * This is a Kokkos-portable version that can run on CPU or GPU
  * depending on the build configuration
  *
- * MPI (optional): \c mpirun -np P ./heatbath -geom p0 p1 ... p_{n-1} L0 ...
- * L_{n-1} beta ntraj [xi0] with ∏ p_i = P and L_i divisible by p_i
- * (Chroma-style).
+ * CLI (order-independent): \c -geom, \c -latt, \c -beta, \c -ntraj,
+ * optional \c -xi0. MPI: \c mpirun -np P with \c ∏ geom_i = P and
+ * global \c L_i divisible by \c geom_i (Chroma-style).
  */
 
 #include "kwqft.hpp"
@@ -18,6 +18,7 @@
 
 #include <Kokkos_Core.hpp>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -27,18 +28,134 @@ using namespace kwqft;
 
 void print_usage(const char *prog_name) {
   printf("Usage:\n");
-  printf("  %s [-geom|--geom p0 p1 ... p_{n-1}] L0 L1 ... L_{n-1} beta ntraj "
-         "[xi0]\n",
-         prog_name);
-  printf("  NDIMS = %d. Optional -geom: MPI process grid (MPI builds only);\n",
+  printf("  %s -latt L0 ... L_{n-1} -beta B -ntraj N [options]\n", prog_name);
+  printf("  Options (any order):\n");
+  printf("    -geom|--geom p0 ... p_{n-1}   MPI process grid (default 1^%d;\n",
          NDIMS);
-  printf("  then global lattice sizes L0..L_{n-1}, beta, trajectory count, "
-         "optional xi0.\n");
-  printf("\nExample (serial): %s 8 8 8 16 6.0 100\n", prog_name);
-  printf(
-      "Example (MPI, 8 ranks): mpirun -np 8 %s -geom 1 2 2 2 4 4 4 8 6.0 10\n",
-      prog_name);
+  printf("                                   MPI builds only; ∏ p_i = ranks)\n");
+  printf("    -latt|--latt L0 ... L_{n-1}    global lattice (required)\n");
+  printf("    -beta B                        gauge coupling (required)\n");
+  printf("    -ntraj N                       number of trajectories (required)\n");
+  printf("    -xi0 X                         bare anisotropy (default 1.0)\n");
+  printf("  NDIMS = %d.  -h, --help\n", NDIMS);
+  printf("\nExample (serial): %s -latt 8 8 8 16 -beta 6.0 -ntraj 100\n",
+         prog_name);
+  printf("Example (MPI, 8 ranks): mpirun -np 8 %s -geom 1 2 2 2 -latt 4 4 "
+         "4 8 -beta 6.0 -ntraj 10\n",
+         prog_name);
 }
+
+namespace {
+
+bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
+                       std::vector<int> &lattice_size, double &beta, int &ntraj,
+                       double &xi0, std::string &err) {
+  for (int d = 0; d < NDIMS; ++d) {
+    proc_grid[d] = 1;
+  }
+  xi0 = 1.0;
+  lattice_size.assign(NDIMS, 0);
+  bool have_geom = false, have_latt = false, have_beta = false;
+  bool have_ntraj = false, have_xi0 = false;
+
+  for (int i = 1; i < argc;) {
+    const char *a = argv[i];
+    if (std::strcmp(a, "-geom") == 0 || std::strcmp(a, "--geom") == 0) {
+      if (have_geom) {
+        err = "duplicate -geom";
+        return false;
+      }
+      if (i + NDIMS >= argc) {
+        err = "-geom must be followed by " + std::to_string(NDIMS) +
+              " positive integers";
+        return false;
+      }
+      for (int d = 0; d < NDIMS; ++d) {
+        proc_grid[d] = std::atoi(argv[i + 1 + d]);
+        if (proc_grid[d] <= 0) {
+          err = "invalid -geom: all entries must be positive";
+          return false;
+        }
+      }
+      have_geom = true;
+      i += 1 + NDIMS;
+      continue;
+    }
+    if (std::strcmp(a, "-latt") == 0 || std::strcmp(a, "--latt") == 0) {
+      if (have_latt) {
+        err = "duplicate -latt";
+        return false;
+      }
+      if (i + NDIMS >= argc) {
+        err = "-latt must be followed by " + std::to_string(NDIMS) +
+              " positive integers";
+        return false;
+      }
+      for (int d = 0; d < NDIMS; ++d) {
+        lattice_size[static_cast<size_t>(d)] = std::atoi(argv[i + 1 + d]);
+        if (lattice_size[static_cast<size_t>(d)] <= 0) {
+          err = "invalid -latt: all entries must be positive";
+          return false;
+        }
+      }
+      have_latt = true;
+      i += 1 + NDIMS;
+      continue;
+    }
+    if (std::strcmp(a, "-beta") == 0) {
+      if (have_beta) {
+        err = "duplicate -beta";
+        return false;
+      }
+      if (i + 1 >= argc) {
+        err = "-beta requires a value";
+        return false;
+      }
+      beta = std::atof(argv[i + 1]);
+      have_beta = true;
+      i += 2;
+      continue;
+    }
+    if (std::strcmp(a, "-ntraj") == 0) {
+      if (have_ntraj) {
+        err = "duplicate -ntraj";
+        return false;
+      }
+      if (i + 1 >= argc) {
+        err = "-ntraj requires a value";
+        return false;
+      }
+      ntraj = std::atoi(argv[i + 1]);
+      have_ntraj = true;
+      i += 2;
+      continue;
+    }
+    if (std::strcmp(a, "-xi0") == 0) {
+      if (have_xi0) {
+        err = "duplicate -xi0";
+        return false;
+      }
+      if (i + 1 >= argc) {
+        err = "-xi0 requires a value";
+        return false;
+      }
+      xi0 = std::atof(argv[i + 1]);
+      have_xi0 = true;
+      i += 2;
+      continue;
+    }
+    err = std::string("unknown or extra argument: ") + a;
+    return false;
+  }
+
+  if (!have_latt || !have_beta || !have_ntraj) {
+    err = "missing required option(s); need -latt, -beta, and -ntraj";
+    return false;
+  }
+  return true;
+}
+
+} // namespace
 
 template <typename Real> void run_heatbath(int ntraj) {
   auto &params = PARAMS::params;
@@ -142,40 +259,28 @@ template <typename Real> void run_heatbath(int ntraj) {
 int main(int argc, char *argv[]) {
   kwqft::initialize(argc, argv);
 
-  int proc_grid[NDIMS];
-  std::vector<std::string> pos;
-  if (!parse_geom_argv(argc, argv, proc_grid, pos)) {
-    fprintf(stderr, "Error: invalid -geom (need %d integers after -geom)\n",
-            NDIMS);
-    print_usage(argv[0]);
-    kwqft::finalize();
-    return 1;
-  }
-
-  const int npos = static_cast<int>(pos.size());
-  if (npos != NDIMS + 2 && npos != NDIMS + 3) {
-    fprintf(stderr, "Error: expected %d or %d positional args, got %d\n",
-            NDIMS + 2, NDIMS + 3, npos);
-    print_usage(argv[0]);
-    kwqft::finalize();
-    return 1;
-  }
-
-  std::vector<int> lattice_size(NDIMS);
-  for (int i = 0; i < NDIMS; ++i) {
-    lattice_size[i] = std::atoi(pos[static_cast<size_t>(i)].c_str());
-    if (lattice_size[i] <= 0) {
-      fprintf(stderr, "Error: invalid lattice dimension L%d\n", i);
+  for (int k = 1; k < argc; ++k) {
+    if (std::strcmp(argv[k], "-h") == 0 || std::strcmp(argv[k], "--help") == 0) {
+      print_usage(argv[0]);
       kwqft::finalize();
-      return 1;
+      return 0;
     }
   }
 
-  double beta = std::atof(pos[static_cast<size_t>(NDIMS)].c_str());
-  int ntraj = std::atoi(pos[static_cast<size_t>(NDIMS + 1)].c_str());
+  int proc_grid[NDIMS];
+  std::vector<int> lattice_size;
+  double beta = 0.0;
+  int ntraj = 0;
   double xi0 = 1.0;
-  if (npos == NDIMS + 3) {
-    xi0 = std::atof(pos[static_cast<size_t>(NDIMS + 2)].c_str());
+  std::string cli_err;
+  if (!parse_heatbath_cli(argc, argv, proc_grid, lattice_size, beta, ntraj, xi0,
+                          cli_err)) {
+    if (mpi_comm_rank() == 0) {
+      fprintf(stderr, "Error: %s\n", cli_err.c_str());
+      print_usage(argv[0]);
+    }
+    kwqft::finalize();
+    return 1;
   }
 
   if (beta <= 0.0 || ntraj <= 0 || xi0 <= 0.0) {
