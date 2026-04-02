@@ -10,10 +10,6 @@
 #define KWQFT_MONTE_HPP
 
 #include "complex.hpp"
-#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
-#include <memory>
-#include "staple_shift_workspace.hpp"
-#endif
 #include "constants.hpp"
 #include "gauge_array.hpp"
 #include "gauge_halo.hpp"
@@ -281,20 +277,11 @@ private:
   GaugeHaloBuffers<Real> *halo_;
   double time_;
   int64_t size_;
-#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
-  std::unique_ptr<StapleShiftWorkspace<Real>> staple_workspace_;
-#endif
 
 public:
   HeatBath(GaugeT &gauge, RandomGenerator &rng, const LatticeParams &params,
          GaugeHaloBuffers<Real> *halo = nullptr)
-      : gauge_(gauge), rng_(rng), params_(params), halo_(halo), time_(0.0)
-#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
-        ,
-        staple_workspace_(
-            std::make_unique<StapleShiftWorkspace<Real>>(params))
-#endif
-  {
+      : gauge_(gauge), rng_(rng), params_(params), halo_(halo), time_(0.0) {
     size_ = params.half_volume;
   }
 
@@ -322,13 +309,6 @@ public:
             (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
         const GaugeHaloDevice<Real> *halo_ptr =
             (params.mpi && halo_) ? &halo_dev : nullptr;
-#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
-        StapleShiftCachePointers<Real> staple_cache{};
-        if (!params.mpi) {
-          staple_workspace_->rebuild(gaugeView.data(), size, params);
-          staple_cache = staple_workspace_->cache_pointers();
-        }
-#endif
         Kokkos::parallel_for(
             "HeatBath", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
@@ -338,19 +318,8 @@ public:
               ComplexT *gaugePtr = gaugeView.data();
 
               // Calculate staple (sum of neighboring plaquettes)
-#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
-              MatrixT staple;
-              if (!params.mpi) {
-                staple = calculateStapleTwoPhase<Real>(
-                    gaugePtr, size, staple_cache, id, parity, mu, params);
-              } else {
-                staple = calculateStaple<Real>(gaugePtr, size, halo_ptr, id,
-                                               parity, mu, params);
-              }
-#else
               MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_ptr,
                                                      id, parity, mu, params);
-#endif
 
               // Get current link index
               int64_t idxoddbit = id + parity * halfVol;
@@ -466,21 +435,11 @@ private:
   LatticeParams params_;
   GaugeHaloBuffers<Real> *halo_;
   double time_;
-#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
-  std::unique_ptr<StapleShiftWorkspace<Real>> staple_workspace_;
-#endif
 
 public:
   Overrelaxation(GaugeT &gauge, const LatticeParams &params,
                  GaugeHaloBuffers<Real> *halo = nullptr)
-      : gauge_(gauge), params_(params), halo_(halo), time_(0.0)
-#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
-        ,
-        staple_workspace_(
-            std::make_unique<StapleShiftWorkspace<Real>>(params))
-#endif
-  {
-  }
+      : gauge_(gauge), params_(params), halo_(halo), time_(0.0) {}
 
   /**
    * @brief Run one sweep of overrelaxation
@@ -502,31 +461,13 @@ public:
             (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
         const GaugeHaloDevice<Real> *halo_ptr =
             (params.mpi && halo_) ? &halo_dev : nullptr;
-#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
-        StapleShiftCachePointers<Real> staple_cache{};
-        if (!params.mpi) {
-          staple_workspace_->rebuild(gaugeView.data(), size, params);
-          staple_cache = staple_workspace_->cache_pointers();
-        }
-#endif
         Kokkos::parallel_for(
             "Overrelaxation", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
               ComplexT *gaugePtr = gaugeView.data();
 
-#if defined(KWQFT_STAPLE_TWO_PHASE) && KWQFT_STAPLE_TWO_PHASE
-              MatrixT staple;
-              if (!params.mpi) {
-                staple = calculateStapleTwoPhase<Real>(
-                    gaugePtr, size, staple_cache, id, parity, mu, params);
-              } else {
-                staple = calculateStaple<Real>(gaugePtr, size, halo_ptr, id,
-                                               parity, mu, params);
-              }
-#else
               MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_ptr,
                                                      id, parity, mu, params);
-#endif
 
               int64_t idxoddbit = id + parity * halfVol;
               int64_t muvolume = mu * params.volume;
