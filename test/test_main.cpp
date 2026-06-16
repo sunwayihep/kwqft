@@ -5,6 +5,7 @@
  * Simple tests for verifying correct functionality
  */
 
+#include "io_gauge.hpp"
 #include "kwqft.hpp"
 #include <Kokkos_Core.hpp>
 #include <cmath>
@@ -109,6 +110,58 @@ template <typename Real> bool test_matrix() {
   return true;
 }
 
+template <typename Real> bool test_gauge_io_roundtrip() {
+  printf("Testing gauge configuration I/O round-trip...\n");
+
+  std::vector<int> lattice_size(NDIMS, 4);
+  if (!PARAMS::initialized) {
+    initializeParams(lattice_size, 6.0, false);
+  }
+  auto &params = PARAMS::params;
+
+  GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
+                         params.volume * NDIMS, true);
+  gauge.initCold();
+
+  RandomGenerator rng(54321, params.half_volume);
+  HeatBath<Real> heatbath(gauge, rng, params);
+  Reunitarize<Real> reunitarize(gauge, params);
+  Plaquette<Real> plaq(gauge, params);
+
+  const int n_sweeps = 5;
+  for (int i = 0; i < n_sweeps; ++i) {
+    heatbath.run();
+    reunitarize.run();
+  }
+
+  plaq.run();
+  const Real plaq_before = plaq.value();
+
+  const std::string filename = "test_io_roundtrip.bin";
+  save_gauge_binary<Real, Real>(gauge, filename, false);
+  load_gauge_binary<Real, Real>(gauge, filename, false);
+
+  plaq.run();
+  const Real plaq_after = plaq.value();
+
+  const Real diff = std::abs(plaq_before - plaq_after);
+  const Real tol = Real(1e-10);
+  if (diff > tol) {
+    printf("  FAILED: plaquette mismatch after save/load\n");
+    printf("    before save   = %f\n", static_cast<double>(plaq_before));
+    printf("    after reload  = %f\n", static_cast<double>(plaq_after));
+    printf("    |difference|  = %e (tolerance %e)\n",
+           static_cast<double>(diff), static_cast<double>(tol));
+    return false;
+  }
+
+  printf("  Plaquette before save  = %f\n", static_cast<double>(plaq_before));
+  printf("  Plaquette after reload = %f (|diff| = %e)\n",
+         static_cast<double>(plaq_after), static_cast<double>(diff));
+  printf("  PASSED\n");
+  return true;
+}
+
 template <typename Real> bool test_gauge_cold_start() {
   printf("Testing GaugeArray cold start...\n");
 
@@ -180,48 +233,48 @@ template <typename Real> bool test_heatbath_thermalization() {
 }
 
 int main(int argc, char *argv[]) {
-  Kokkos::initialize(argc, argv);
+  kwqft::initialize(argc, argv);
 
-  {
-    printf("===========================================\n");
-    printf("KWQFT Test Suite\n");
-    printf("NCOLORS = %d, NDIMS = %d\n", NCOLORS, NDIMS);
-    printf("===========================================\n\n");
+  int passed = 0;
+  int failed = 0;
 
-    int passed = 0;
-    int failed = 0;
-
-    // Run tests
-    if (test_complex<double>())
-      passed++;
-    else
-      failed++;
-    if (test_matrix<double>())
-      passed++;
-    else
-      failed++;
-    if (test_gauge_cold_start<double>())
-      passed++;
-    else
-      failed++;
-    if (test_heatbath_thermalization<double>())
-      passed++;
-    else
-      failed++;
-
-    printf("\n===========================================\n");
-    printf("Results: %d passed, %d failed\n", passed, failed);
-    printf("===========================================\n");
-
-    // Cleanup before Kokkos::finalize()
-    finalizeParams();
-
-    if (failed > 0) {
-      Kokkos::finalize();
-      return 1;
-    }
+#ifdef KWQFT_USE_MPI
+  if (mpi_comm_size() > 1 && mpi_comm_rank() != 0) {
+    kwqft::finalize();
+    return 0;
   }
+#endif
 
-  Kokkos::finalize();
-  return 0;
+  printf("===========================================\n");
+  printf("KWQFT Test Suite\n");
+  printf("NCOLORS = %d, NDIMS = %d\n", NCOLORS, NDIMS);
+  printf("===========================================\n\n");
+
+  if (test_complex<double>())
+    passed++;
+  else
+    failed++;
+  if (test_matrix<double>())
+    passed++;
+  else
+    failed++;
+  if (test_gauge_io_roundtrip<double>())
+    passed++;
+  else
+    failed++;
+  if (test_gauge_cold_start<double>())
+    passed++;
+  else
+    failed++;
+  if (test_heatbath_thermalization<double>())
+    passed++;
+  else
+    failed++;
+
+  printf("\n===========================================\n");
+  printf("Results: %d passed, %d failed\n", passed, failed);
+  printf("===========================================\n");
+
+  kwqft::finalize();
+  return failed > 0 ? 1 : 0;
 }
