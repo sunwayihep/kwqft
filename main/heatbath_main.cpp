@@ -10,6 +10,7 @@
  * global \c L_i divisible by \c geom_i (Chroma-style).
  */
 
+#include "io_gauge.hpp"
 #include "kwqft.hpp"
 #ifdef KWQFT_USE_MPI
 #include "gauge_halo.hpp"
@@ -203,7 +204,7 @@ template <typename Real> void run_heatbath(int ntraj) {
   }
 
   int num_warmup = 0;
-  int save_interval = 100;
+  int save_interval = 10;
   std::ostringstream prefix_stream;
   prefix_stream << "su" << NCOLORS << "_nd" << NDIMS << "_beta" << params.beta;
   for (int i = 0; i < NDIMS; ++i) {
@@ -240,11 +241,10 @@ template <typename Real> void run_heatbath(int ntraj) {
       printf("Trajectory time: %.4f s\n\n", traj_timer.elapsed());
     }
 
-    if (traj > num_warmup && traj % save_interval == 0 &&
-        mpi_comm_rank() == 0) {
+    if (traj > num_warmup && traj % save_interval == 0) {
       std::string filename =
           save_prefix + "_cfg_" + std::to_string(traj) + ".bin";
-      printf("Would save configuration to: %s\n", filename.c_str());
+      save_gauge_binary<double, double>(gauge, filename, false);
     }
   }
 
