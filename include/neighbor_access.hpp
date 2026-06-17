@@ -142,7 +142,7 @@ loadGhostFaceLink(const Complex<Real> *buf, int64_t face_idx, int dir,
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
 loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
-                      const GaugeHaloDevice<Real> *halo, const int x[NDIMS],
+                      const GaugeHaloDevice<Real> &halo, const int x[NDIMS],
                       int dir, const LatticeParams &p,
                       MatrixSun<Real, NCOLORS> &U) {
   if (!p.mpi) {
@@ -173,10 +173,6 @@ loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
     return;
   }
 
-  if (halo == nullptr) {
-    U = MatrixSun<Real, NCOLORS>::zero();
-    return;
-  }
   int off[NDIMS];
   int xw[NDIMS];
   for (int d = 0; d < NDIMS; ++d) {
@@ -193,7 +189,7 @@ loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
   }
 
   const int code = halo_offset_to_code(off);
-  const Complex<Real> *buf = halo->recv[code];
+  const Complex<Real> *buf = halo.recv[code];
   if (buf == nullptr) {
     U = MatrixSun<Real, NCOLORS>::zero();
     return;

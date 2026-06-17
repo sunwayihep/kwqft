@@ -36,7 +36,7 @@ namespace kwqft {
 template <typename Real>
 KOKKOS_INLINE_FUNCTION MatrixSun<Real, NCOLORS>
 calculateStaple(const Complex<Real> *gaugePtr, int64_t soa_stride,
-                const GaugeHaloDevice<Real> *halo, int64_t id, int oddbit,
+                const GaugeHaloDevice<Real> &halo, int64_t id, int oddbit,
                 int mu, const LatticeParams &params) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
 
@@ -305,10 +305,8 @@ public:
         if (halo_ && params.mpi) {
           halo_->exchange(gaugeView.data(), size, params);
         }
-        GaugeHaloDevice<Real> halo_dev =
+        const GaugeHaloDevice<Real> halo_dev =
             (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
-        const GaugeHaloDevice<Real> *halo_ptr =
-            (params.mpi && halo_) ? &halo_dev : nullptr;
         Kokkos::parallel_for(
             "HeatBath", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
@@ -318,7 +316,7 @@ public:
               ComplexT *gaugePtr = gaugeView.data();
 
               // Calculate staple (sum of neighboring plaquettes)
-              MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_ptr,
+              MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_dev,
                                                      id, parity, mu, params);
 
               // Get current link index
@@ -457,16 +455,14 @@ public:
         if (halo_ && params.mpi) {
           halo_->exchange(gaugeView.data(), size, params);
         }
-        GaugeHaloDevice<Real> halo_dev =
+        const GaugeHaloDevice<Real> halo_dev =
             (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
-        const GaugeHaloDevice<Real> *halo_ptr =
-            (params.mpi && halo_) ? &halo_dev : nullptr;
         Kokkos::parallel_for(
             "Overrelaxation", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
               ComplexT *gaugePtr = gaugeView.data();
 
-              MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_ptr,
+              MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_dev,
                                                      id, parity, mu, params);
 
               int64_t idxoddbit = id + parity * halfVol;

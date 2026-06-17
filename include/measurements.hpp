@@ -73,10 +73,8 @@ public:
     if (halo_ && params.mpi) {
       halo_->exchange(gaugeView.data(), size, params);
     }
-    GaugeHaloDevice<Real> halo_dev =
+    const GaugeHaloDevice<Real> halo_dev =
         (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
-    const GaugeHaloDevice<Real> *halo_ptr =
-        (params.mpi && halo_) ? &halo_dev : nullptr;
 
     Real plaqSum = 0;
     Real spatialSum = 0;
@@ -100,7 +98,7 @@ public:
 
           for (int mu = 0; mu < NDIMS; ++mu) {
             MatrixT uMuX;
-            loadGaugeLinkAtCoords(gaugePtr, size, halo_ptr, x, mu, params,
+            loadGaugeLinkAtCoords(gaugePtr, size, halo_dev, x, mu, params,
                                   uMuX);
             int xpmu[NDIMS];
             for (int d = 0; d < NDIMS; ++d) {
@@ -110,16 +108,16 @@ public:
 
             for (int nu = mu + 1; nu < NDIMS; ++nu) {
               MatrixT uNuXmu, uMuXnu, uNuX;
-              loadGaugeLinkAtCoords(gaugePtr, size, halo_ptr, xpmu, nu, params,
+              loadGaugeLinkAtCoords(gaugePtr, size, halo_dev, xpmu, nu, params,
                                     uNuXmu);
               int xpnu[NDIMS];
               for (int d = 0; d < NDIMS; ++d) {
                 xpnu[d] = x[d];
               }
               xpnu[nu]++;
-              loadGaugeLinkAtCoords(gaugePtr, size, halo_ptr, xpnu, mu, params,
+              loadGaugeLinkAtCoords(gaugePtr, size, halo_dev, xpnu, mu, params,
                                     uMuXnu);
-              loadGaugeLinkAtCoords(gaugePtr, size, halo_ptr, x, nu, params,
+              loadGaugeLinkAtCoords(gaugePtr, size, halo_dev, x, nu, params,
                                     uNuX);
               MatrixT link = uNuXmu * uMuXnu.dagger() * uNuX.dagger();
               Real tr = (uMuX * link).realtrace();
