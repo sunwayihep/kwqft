@@ -230,14 +230,16 @@ template <typename Real> void run_heatbath(int ntraj) {
     plaquette.run();
     polyakov.run();
 
+    plaquette.printValue();
+    polyakov.printValue();
     if (mpi_comm_rank() == 0) {
-      plaquette.printValue();
-      polyakov.printValue();
       printf("\nPerformance statistics:\n");
-      heatbath.stat();
-      reunitarize.stat();
-      plaquette.stat();
-      polyakov.stat();
+    }
+    heatbath.stat();
+    reunitarize.stat();
+    plaquette.stat();
+    polyakov.stat();
+    if (mpi_comm_rank() == 0) {
       printf("Trajectory time: %.4f s\n\n", traj_timer.elapsed());
     }
 

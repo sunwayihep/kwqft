@@ -17,6 +17,7 @@
 #include "kwqft_common.hpp"
 #include "matrixsun.hpp"
 #include "neighbor_access.hpp"
+#include "perf_stats.hpp"
 #include "mpi_layout.hpp"
 
 #ifdef KWQFT_USE_MPI
@@ -185,12 +186,15 @@ public:
   }
 
   double flops() const {
-    return (time_ > 0) ? (static_cast<double>(flop()) * 1.0e-9) / time_ : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.gflops;
   }
 
   double bandwidth() const {
-    return (time_ > 0) ? static_cast<double>(bytes()) / (time_ * (1LL << 30))
-                       : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.bandwidth_gbs;
   }
 
   void printValue() const {
@@ -203,8 +207,13 @@ public:
   }
 
   void stat() const {
-    printf("Plaquette:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", time_, bandwidth(),
-           flops());
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    if (mpi_comm_rank() != 0) {
+      return;
+    }
+    printf("Plaquette:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", report.time,
+           report.bandwidth_gbs, report.gflops);
   }
 };
 
@@ -363,12 +372,15 @@ public:
   }
 
   double flops() const {
-    return (time_ > 0) ? (static_cast<double>(flop()) * 1.0e-9) / time_ : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.gflops;
   }
 
   double bandwidth() const {
-    return (time_ > 0) ? static_cast<double>(bytes()) / (time_ * (1LL << 30))
-                       : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.bandwidth_gbs;
   }
 
   void printValue() const {
@@ -386,8 +398,13 @@ public:
   }
 
   void stat() const {
-    printf("Polyakov Loop:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", time_,
-           bandwidth(), flops());
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    if (mpi_comm_rank() != 0) {
+      return;
+    }
+    printf("Polyakov Loop:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", report.time,
+           report.bandwidth_gbs, report.gflops);
   }
 };
 
@@ -555,17 +572,25 @@ public:
   }
 
   double flops() const {
-    return (time_ > 0) ? (static_cast<double>(flop()) * 1.0e-9) / time_ : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.gflops;
   }
 
   double bandwidth() const {
-    return (time_ > 0) ? static_cast<double>(bytes()) / (time_ * (1LL << 30))
-                       : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.bandwidth_gbs;
   }
 
   void stat() const {
-    printf("Reunitarize:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", time_, bandwidth(),
-           flops());
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    if (mpi_comm_rank() != 0) {
+      return;
+    }
+    printf("Reunitarize:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", report.time,
+           report.bandwidth_gbs, report.gflops);
   }
 };
 

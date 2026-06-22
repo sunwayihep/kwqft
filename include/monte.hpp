@@ -17,6 +17,8 @@
 #include "neighbor_access.hpp"
 #include "shift.hpp"
 #include "kwqft_common.hpp"
+#include "perf_stats.hpp"
+#include "mpi_layout.hpp"
 #include "matrixsun.hpp"
 #include "msu2.hpp"
 #include "random.hpp"
@@ -395,23 +397,31 @@ public:
    * @brief Get GFlops performance
    */
   double flops() const {
-    return (time_ > 0) ? (static_cast<double>(flop()) * 1.0e-9) / time_ : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.gflops;
   }
 
   /**
    * @brief Get bandwidth in GB/s
    */
   double bandwidth() const {
-    return (time_ > 0) ? static_cast<double>(bytes()) / (time_ * (1LL << 30))
-                       : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.bandwidth_gbs;
   }
 
   /**
    * @brief Print statistics
    */
   void stat() const {
-    printf("HeatBath:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", time_, bandwidth(),
-           flops());
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    if (mpi_comm_rank() != 0) {
+      return;
+    }
+    printf("HeatBath:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", report.time,
+           report.bandwidth_gbs, report.gflops);
   }
 };
 
@@ -523,17 +533,25 @@ public:
   }
 
   double flops() const {
-    return (time_ > 0) ? (static_cast<double>(flop()) * 1.0e-9) / time_ : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.gflops;
   }
 
   double bandwidth() const {
-    return (time_ > 0) ? static_cast<double>(bytes()) / (time_ * (1LL << 30))
-                       : 0.0;
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    return report.bandwidth_gbs;
   }
 
   void stat() const {
-    printf("Overrelaxation:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", time_,
-           bandwidth(), flops());
+    const auto report =
+        make_perf_report(flop(), bytes(), time_, params_.mpi, params_.nproc);
+    if (mpi_comm_rank() != 0) {
+      return;
+    }
+    printf("Overrelaxation:  %.4f s\t%.2f GB/s\t%.2f GFlops\n", report.time,
+           report.bandwidth_gbs, report.gflops);
   }
 };
 
