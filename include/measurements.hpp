@@ -18,11 +18,13 @@
 #include "matrixsun.hpp"
 #include "neighbor_access.hpp"
 #include "perf_stats.hpp"
+#include "shift.hpp"
 #include "mpi_layout.hpp"
 
 #ifdef KWQFT_USE_MPI
 #include <mpi.h>
 #endif
+#include <vector>
 
 namespace kwqft {
 
@@ -236,12 +238,15 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
+  GaugeHaloBuffers<Real> *halo_;
   ComplexT polyValue_;
   double time_;
 
 public:
-  PolyakovLoop(GaugeT &gauge, const LatticeParams &params)
-      : gauge_(gauge), params_(params), polyValue_(0, 0), time_(0) {}
+  PolyakovLoop(GaugeT &gauge, const LatticeParams &params,
+               GaugeHaloBuffers<Real> *halo = nullptr)
+      : gauge_(gauge), params_(params), halo_(halo), polyValue_(0, 0),
+        time_(0) {}
 
   /**
    * @brief Compute the Polyakov loop
@@ -249,83 +254,139 @@ public:
   void run() {
     Kokkos::Timer timer;
 
-    if (params_.mpi && params_.proc_grid[NDIMS - 1] != 1) {
-      polyValue_ = ComplexT(0, 0);
-      time_ = timer.seconds();
-      return;
-    }
-
     auto gaugeView = gauge_.getView();
     auto params = params_;
     int64_t size = gauge_.size();
 
-    // Calculate spatial volume
+    if (halo_ && params.mpi) {
+      halo_->exchange(gaugeView.data(), size, params);
+    }
+
     int64_t spatialVolume = 1;
     for (int i = 0; i < NDIMS - 1; ++i) {
       spatialVolume *= params.grid[i];
     }
 
-    int nt = params.grid[NDIMS - 1];
-    int64_t volume = params.volume;
-    int tDir = NDIMS - 1;
-    int64_t tVolume = tDir * volume;
+    const int nt = params.grid[NDIMS - 1];
+    const int tDir = NDIMS - 1;
+
+#ifdef KWQFT_USE_MPI
+    const int t_nproc = params.mpi ? params.proc_grid[tDir] : 1;
+    const int t_coord = params.mpi ? params.coord[tDir] : 0;
+    const bool mpi_time_split = params.mpi && t_nproc > 1;
+#else
+    const int t_nproc = 1;
+    const int t_coord = 0;
+    const bool mpi_time_split = false;
+#endif
 
     Real polyRe = 0;
     Real polyIm = 0;
 
-    // Parallel reduction over spatial sites
-    Kokkos::parallel_reduce(
-        "PolyakovLoop",
-        Kokkos::RangePolicy<DefaultExecSpace>(0, spatialVolume),
-        KOKKOS_LAMBDA(const int64_t spatialIdx, Real &reSum, Real &imSum) {
-          ComplexT *gaugePtr = gaugeView.data();
+    if (mpi_time_split) {
+      Kokkos::View<MatrixT *, DefaultMemSpace> local_poly(
+          Kokkos::view_alloc("PolyakovLoop_local", Kokkos::WithoutInitializing),
+          spatialVolume);
 
-          // Convert spatial index to coordinates
-          int x[NDIMS];
-          int64_t temp = spatialIdx;
-          for (int i = 0; i < NDIMS - 1; ++i) {
-            x[i] = static_cast<int>(temp % params.grid[i]);
-            temp /= params.grid[i];
-          }
-          x[NDIMS - 1] = 0; // Start at t=0
+      Kokkos::parallel_for(
+          "PolyakovLoop_local",
+          Kokkos::RangePolicy<DefaultExecSpace>(0, spatialVolume),
+          KOKKOS_LAMBDA(const int64_t spatialIdx) {
+            ComplexT *gaugePtr = gaugeView.data();
 
-          // Product of temporal links
-          MatrixT poly = MatrixT::identity();
-
-          for (int t = 0; t < nt; ++t) {
-            x[NDIMS - 1] = t;
-            int64_t idx = indexNdNm<NDIMS>(x, params);
-
-            // Load temporal link
-            MatrixT uT;
-            for (int i = 0; i < NCOLORS; ++i) {
-              for (int j = 0; j < NCOLORS; ++j) {
-                uT.e[i][j] =
-                    gaugePtr[idx + tVolume + (j + i * NCOLORS) * size];
-              }
+            int x[NDIMS];
+            int64_t temp = spatialIdx;
+            for (int i = 0; i < NDIMS - 1; ++i) {
+              x[i] = static_cast<int>(temp % params.grid[i]);
+              temp /= params.grid[i];
             }
 
-            poly = poly * uT;
-          }
+            MatrixT poly = MatrixT::identity();
+            for (int t = 0; t < nt; ++t) {
+              x[tDir] = t;
+              const int64_t idx_eo = coords_to_eo_idx(x, params);
+              MatrixT uT;
+              loadGaugeLinkSoa(gaugePtr, idx_eo, tDir, size, params, uT);
+              poly = poly * uT;
+            }
+            local_poly(spatialIdx) = poly;
+          });
+      Kokkos::fence();
 
-          // Take trace
-          ComplexT tr = poly.trace() / Real(NCOLORS);
-          reSum += tr.real();
-          imSum += tr.imag();
-        },
-        polyRe, polyIm);
+      auto host_poly = Kokkos::create_mirror_view(local_poly);
+      Kokkos::deep_copy(host_poly, local_poly);
+
+      const int nbytes =
+          static_cast<int>(spatialVolume * static_cast<int64_t>(sizeof(MatrixT)));
+      MatrixT *poly_ptr = host_poly.data();
 
 #ifdef KWQFT_USE_MPI
-    if (params_.mpi && params_.proc_grid[NDIMS - 1] == 1) {
+      if (t_coord > 0) {
+        std::vector<MatrixT> recv_poly(static_cast<size_t>(spatialVolume));
+        const int rank_down = mpi_cart_neighbor(tDir, -1);
+        MPI_Recv(recv_poly.data(), nbytes, MPI_BYTE, rank_down, 8100 + t_coord,
+                 kwqft_mpi_cart_comm(), MPI_STATUS_IGNORE);
+        for (int64_t s = 0; s < spatialVolume; ++s) {
+          poly_ptr[s] = recv_poly[static_cast<size_t>(s)] * poly_ptr[s];
+        }
+      }
+      if (t_coord < t_nproc - 1) {
+        const int rank_up = mpi_cart_neighbor(tDir, +1);
+        MPI_Send(poly_ptr, nbytes, MPI_BYTE, rank_up, 8100 + t_coord + 1,
+                 kwqft_mpi_cart_comm());
+      }
+#endif
+
+      if (t_coord == t_nproc - 1) {
+        for (int64_t s = 0; s < spatialVolume; ++s) {
+          const ComplexT tr = poly_ptr[s].trace() / Real(NCOLORS);
+          polyRe += tr.real();
+          polyIm += tr.imag();
+        }
+      }
+    } else {
+      Kokkos::parallel_reduce(
+          "PolyakovLoop",
+          Kokkos::RangePolicy<DefaultExecSpace>(0, spatialVolume),
+          KOKKOS_LAMBDA(const int64_t spatialIdx, Real &reSum, Real &imSum) {
+            ComplexT *gaugePtr = gaugeView.data();
+
+            int x[NDIMS];
+            int64_t temp = spatialIdx;
+            for (int i = 0; i < NDIMS - 1; ++i) {
+              x[i] = static_cast<int>(temp % params.grid[i]);
+              temp /= params.grid[i];
+            }
+            x[tDir] = 0;
+
+            MatrixT poly = MatrixT::identity();
+            for (int t = 0; t < nt; ++t) {
+              x[tDir] = t;
+              const int64_t idx_eo = coords_to_eo_idx(x, params);
+              MatrixT uT;
+              loadGaugeLinkSoa(gaugePtr, idx_eo, tDir, size, params, uT);
+              poly = poly * uT;
+            }
+
+            const ComplexT tr = poly.trace() / Real(NCOLORS);
+            reSum += tr.real();
+            imSum += tr.imag();
+          },
+          polyRe, polyIm);
+    }
+
+#ifdef KWQFT_USE_MPI
+    if (params_.mpi) {
       double lr[2] = {static_cast<double>(polyRe), static_cast<double>(polyIm)};
       double gr[2];
       MPI_Allreduce(lr, gr, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-      int64_t gsp = 1;
+      int64_t global_spatial = 1;
       for (int i = 0; i < NDIMS - 1; ++i) {
-        gsp *= static_cast<int64_t>(params_.global_grid[i]);
+        global_spatial *= static_cast<int64_t>(params_.global_grid[i]);
       }
-      polyValue_ = ComplexT(static_cast<Real>(gr[0] / static_cast<double>(gsp)),
-                            static_cast<Real>(gr[1] / static_cast<double>(gsp)));
+      polyValue_ =
+          ComplexT(static_cast<Real>(gr[0] / static_cast<double>(global_spatial)),
+                   static_cast<Real>(gr[1] / static_cast<double>(global_spatial)));
     } else
 #endif
     {
@@ -385,10 +446,6 @@ public:
 
   void printValue() const {
     if (params_.mpi && mpi_comm_rank() != 0) {
-      return;
-    }
-    if (params_.mpi && params_.proc_grid[NDIMS - 1] != 1) {
-      printf("Polyakov Loop: N/A (MPI split along time direction)\n");
       return;
     }
     printf("Polyakov Loop: %.12f + %.12f i (|P| = %.12f)\n",

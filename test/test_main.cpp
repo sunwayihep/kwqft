@@ -7,11 +7,25 @@
 
 #include "io_gauge.hpp"
 #include "kwqft.hpp"
+#ifdef KWQFT_USE_MPI
+#include "gauge_halo.hpp"
+#include "mpi_layout.hpp"
+#include <mpi.h>
+#endif
 #include <Kokkos_Core.hpp>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
 using namespace kwqft;
+
+void reset_and_initialize_params(const std::vector<int> &lattice_size,
+                                 double beta, double xi0 = 1.0) {
+  if (PARAMS::initialized) {
+    finalizeParams();
+  }
+  initializeParams(lattice_size, beta, false, xi0);
+}
 
 template <typename Real> bool test_complex() {
   printf("Testing Complex<Real>...\n");
@@ -114,9 +128,7 @@ template <typename Real> bool test_gauge_io_roundtrip() {
   printf("Testing gauge configuration I/O round-trip...\n");
 
   std::vector<int> lattice_size(NDIMS, 4);
-  if (!PARAMS::initialized) {
-    initializeParams(lattice_size, 6.0, false);
-  }
+  reset_and_initialize_params(lattice_size, 6.0);
   auto &params = PARAMS::params;
 
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
@@ -167,11 +179,11 @@ template <typename Real> bool test_gauge_cold_start() {
 
   // Create a small lattice
   std::vector<int> lattice_size(NDIMS, 4);
-  initializeParams(lattice_size, 6.0, false);
+  reset_and_initialize_params(lattice_size, 6.0);
   auto &params = PARAMS::params;
 
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
-                         params.volume * NDIMS, false);
+                         params.volume * NDIMS, true);
 
   gauge.initCold();
 
@@ -197,11 +209,11 @@ template <typename Real> bool test_heatbath_thermalization() {
   // Create a small lattice
   std::vector<int> lattice_size(NDIMS, 4);
   double beta = 6.0;
-  initializeParams(lattice_size, beta, false);
+  reset_and_initialize_params(lattice_size, beta);
   auto &params = PARAMS::params;
 
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
-                         params.volume * NDIMS, false);
+                         params.volume * NDIMS, true);
   gauge.initCold();
 
   RandomGenerator rng(12345, params.half_volume);
@@ -232,49 +244,261 @@ template <typename Real> bool test_heatbath_thermalization() {
   return true;
 }
 
+#ifdef KWQFT_USE_MPI
+template <typename Real> bool test_mpi_gauge_io_roundtrip() {
+  const int nproc = mpi_comm_size();
+  const int rank = mpi_comm_rank();
+
+  if (nproc < 2) {
+    if (rank == 0) {
+      printf("Testing MPI gauge configuration I/O round-trip...\n");
+      printf("  SKIPPED (need >= 2 MPI ranks)\n");
+    }
+    return true;
+  }
+  if (nproc != 2) {
+    if (rank == 0) {
+      printf("Testing MPI gauge configuration I/O round-trip...\n");
+      printf("  SKIPPED (need exactly 2 MPI ranks)\n");
+    }
+    return true;
+  }
+
+  if (rank == 0) {
+    printf("Testing MPI gauge configuration I/O round-trip...\n");
+  }
+
+  int proc_grid[NDIMS] = {2, 1, 1, 1};
+  std::vector<int> global_lattice(NDIMS, 4);
+  int global_lattice_arr[NDIMS];
+  for (int d = 0; d < NDIMS; ++d) {
+    global_lattice_arr[d] = global_lattice[d];
+  }
+
+  if (PARAMS::initialized) {
+    finalizeParams();
+  }
+  mpi_setup_cartesian(proc_grid, global_lattice_arr);
+  std::vector<int> pg(proc_grid, proc_grid + NDIMS);
+  initializeParamsDistributed(global_lattice, pg, 6.0, false);
+
+  auto &params = PARAMS::params;
+
+  std::unique_ptr<GaugeHaloBuffers<Real>> halo_storage;
+  GaugeHaloBuffers<Real> *halo_ptr = nullptr;
+  if (params.mpi) {
+    halo_storage = std::make_unique<GaugeHaloBuffers<Real>>(params);
+    halo_ptr = halo_storage.get();
+  }
+
+  GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
+                         params.volume * NDIMS, true);
+  gauge.initCold();
+
+  RandomGenerator rng(424242u + static_cast<unsigned int>(rank),
+                    params.half_volume);
+  HeatBath<Real> heatbath(gauge, rng, params, halo_ptr);
+  Reunitarize<Real> reunitarize(gauge, params);
+  Plaquette<Real> plaq(gauge, params, halo_ptr);
+
+  const int n_sweeps = 3;
+  for (int i = 0; i < n_sweeps; ++i) {
+    heatbath.run();
+    reunitarize.run();
+  }
+
+  plaq.run();
+  const Real plaq_before = plaq.value();
+
+  const std::string filename = "test_mpi_io_roundtrip.bin";
+  save_gauge_binary<Real, Real>(gauge, filename, false);
+  load_gauge_binary<Real, Real>(gauge, filename, false);
+
+  plaq.run();
+  const Real plaq_after = plaq.value();
+
+  const Real diff = std::abs(plaq_before - plaq_after);
+  const Real tol = Real(1e-10);
+  bool ok = diff <= tol;
+  if (rank == 0) {
+    if (!ok) {
+      printf("  FAILED: plaquette mismatch after MPI save/load\n");
+      printf("    before save   = %f\n", static_cast<double>(plaq_before));
+      printf("    after reload  = %f\n", static_cast<double>(plaq_after));
+      printf("    |difference|  = %e (tolerance %e)\n",
+             static_cast<double>(diff), static_cast<double>(tol));
+    } else {
+      printf("  Plaquette before save  = %f\n",
+             static_cast<double>(plaq_before));
+      printf("  Plaquette after reload = %f (|diff| = %e)\n",
+             static_cast<double>(plaq_after), static_cast<double>(diff));
+      printf("  PASSED\n");
+    }
+  }
+
+  int ok_int = ok ? 1 : 0;
+  MPI_Bcast(&ok_int, 1, MPI_INT, 0, MPI_COMM_WORLD);
+  return ok_int != 0;
+}
+
+template <typename Real> bool test_mpi_polyakov_time_split() {
+  const int nproc = mpi_comm_size();
+  const int rank = mpi_comm_rank();
+
+  if (nproc < 2) {
+    if (rank == 0) {
+      printf("Testing MPI Polyakov loop (time direction split)...\n");
+      printf("  SKIPPED (need >= 2 MPI ranks)\n");
+    }
+    return true;
+  }
+  if (nproc != 2) {
+    if (rank == 0) {
+      printf("Testing MPI Polyakov loop (time direction split)...\n");
+      printf("  SKIPPED (need exactly 2 MPI ranks)\n");
+    }
+    return true;
+  }
+
+  if (rank == 0) {
+    printf("Testing MPI Polyakov loop (time direction split)...\n");
+  }
+
+  int proc_grid[NDIMS] = {1, 1, 1, 2};
+  std::vector<int> global_lattice(NDIMS, 4);
+  global_lattice[NDIMS - 1] = 8;
+  int global_lattice_arr[NDIMS];
+  for (int d = 0; d < NDIMS; ++d) {
+    global_lattice_arr[d] = global_lattice[d];
+  }
+
+  if (PARAMS::initialized) {
+    finalizeParams();
+  }
+  mpi_setup_cartesian(proc_grid, global_lattice_arr);
+  std::vector<int> pg(proc_grid, proc_grid + NDIMS);
+  initializeParamsDistributed(global_lattice, pg, 6.0, false);
+
+  auto &params = PARAMS::params;
+
+  std::unique_ptr<GaugeHaloBuffers<Real>> halo_storage;
+  GaugeHaloBuffers<Real> *halo_ptr = nullptr;
+  if (params.mpi) {
+    halo_storage = std::make_unique<GaugeHaloBuffers<Real>>(params);
+    halo_ptr = halo_storage.get();
+  }
+
+  GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
+                         params.volume * NDIMS, true);
+  gauge.initCold();
+
+  PolyakovLoop<Real> polyakov(gauge, params, halo_ptr);
+  polyakov.run();
+
+  const Real cold_abs = polyakov.absValue();
+  const Real cold_tol = Real(1e-6);
+  bool ok = std::abs(cold_abs - Real(1)) <= cold_tol;
+
+  if (ok) {
+    RandomGenerator rng(777u + static_cast<unsigned int>(rank), params.half_volume);
+    HeatBath<Real> heatbath(gauge, rng, params, halo_ptr);
+    for (int i = 0; i < 5; ++i) {
+      heatbath.run();
+    }
+    polyakov.run();
+    const Real hot_abs = polyakov.absValue();
+    ok = hot_abs > Real(0) && hot_abs < Real(1.01);
+    if (rank == 0) {
+      if (!ok) {
+        printf("  FAILED: thermalized |P| = %f out of range\n",
+               static_cast<double>(hot_abs));
+      } else {
+        printf("  Cold start |P| = %f (expected 1.0)\n",
+               static_cast<double>(cold_abs));
+        printf("  After 5 sweeps |P| = %f\n", static_cast<double>(hot_abs));
+        printf("  PASSED\n");
+      }
+    }
+  } else if (rank == 0) {
+    printf("  FAILED: cold start |P| = %f (expected 1.0)\n",
+           static_cast<double>(cold_abs));
+  }
+
+  int ok_int = ok ? 1 : 0;
+  MPI_Bcast(&ok_int, 1, MPI_INT, 0, MPI_COMM_WORLD);
+  return ok_int != 0;
+}
+#endif
+
 int main(int argc, char *argv[]) {
   kwqft::initialize(argc, argv);
 
   int passed = 0;
   int failed = 0;
+  const bool is_primary = (mpi_comm_rank() == 0);
 
 #ifdef KWQFT_USE_MPI
-  if (mpi_comm_size() > 1 && mpi_comm_rank() != 0) {
-    kwqft::finalize();
-    return 0;
+  const bool run_serial_suite = (mpi_comm_size() == 1) && is_primary;
+#else
+  const bool run_serial_suite = true;
+#endif
+
+  if (is_primary) {
+    printf("===========================================\n");
+    printf("KWQFT Test Suite\n");
+    printf("NCOLORS = %d, NDIMS = %d\n", NCOLORS, NDIMS);
+    printf("===========================================\n\n");
+  }
+
+  if (run_serial_suite) {
+    if (test_complex<double>())
+      passed++;
+    else
+      failed++;
+    if (test_matrix<double>())
+      passed++;
+    else
+      failed++;
+    if (test_gauge_io_roundtrip<double>())
+      passed++;
+    else
+      failed++;
+    if (test_gauge_cold_start<double>())
+      passed++;
+    else
+      failed++;
+    if (test_heatbath_thermalization<double>())
+      passed++;
+    else
+      failed++;
+  }
+
+#ifdef KWQFT_USE_MPI
+  if (mpi_comm_size() > 1) {
+    if (test_mpi_gauge_io_roundtrip<double>())
+      passed++;
+    else
+      failed++;
+    if (test_mpi_polyakov_time_split<double>())
+      passed++;
+    else
+      failed++;
   }
 #endif
 
-  printf("===========================================\n");
-  printf("KWQFT Test Suite\n");
-  printf("NCOLORS = %d, NDIMS = %d\n", NCOLORS, NDIMS);
-  printf("===========================================\n\n");
+  if (is_primary) {
+    printf("\n===========================================\n");
+    printf("Results: %d passed, %d failed\n", passed, failed);
+    printf("===========================================\n");
+  }
 
-  if (test_complex<double>())
-    passed++;
-  else
-    failed++;
-  if (test_matrix<double>())
-    passed++;
-  else
-    failed++;
-  if (test_gauge_io_roundtrip<double>())
-    passed++;
-  else
-    failed++;
-  if (test_gauge_cold_start<double>())
-    passed++;
-  else
-    failed++;
-  if (test_heatbath_thermalization<double>())
-    passed++;
-  else
-    failed++;
-
-  printf("\n===========================================\n");
-  printf("Results: %d passed, %d failed\n", passed, failed);
-  printf("===========================================\n");
+  int exit_code = failed > 0 ? 1 : 0;
+#ifdef KWQFT_USE_MPI
+  if (mpi_comm_size() > 1) {
+    MPI_Bcast(&exit_code, 1, MPI_INT, 0, MPI_COMM_WORLD);
+  }
+#endif
 
   kwqft::finalize();
-  return failed > 0 ? 1 : 0;
+  return exit_code;
 }

@@ -187,12 +187,13 @@ template <typename Real> void run_heatbath(int ntraj) {
 #ifdef KWQFT_USE_MPI
   HeatBath<Real> heatbath(gauge, rng, params, halo_ptr);
   Plaquette<Real> plaquette(gauge, params, halo_ptr);
+  PolyakovLoop<Real> polyakov(gauge, params, halo_ptr);
 #else
   HeatBath<Real> heatbath(gauge, rng, params);
   Plaquette<Real> plaquette(gauge, params);
+  PolyakovLoop<Real> polyakov(gauge, params);
 #endif
   Reunitarize<Real> reunitarize(gauge, params);
-  PolyakovLoop<Real> polyakov(gauge, params);
 
   plaquette.run();
   polyakov.run();
