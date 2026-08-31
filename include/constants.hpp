@@ -73,6 +73,9 @@ struct LatticeParams {
     if (static_cast<int>(lattice_size.size()) != NDIMS) {
       KWQFT_ERROR("Lattice size vector must have NDIMS elements");
     }
+    if (lattice_size[0] % 2 != 0) {
+      KWQFT_ERROR("First lattice dimension (grid[0]) must be even for even/odd ordering");
+    }
 
     volume = 1;
     for (int i = 0; i < NDIMS; ++i) {

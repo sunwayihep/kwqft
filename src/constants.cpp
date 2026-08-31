@@ -72,6 +72,11 @@ void initializeParamsDistributed(const std::vector<int> &global_lattice,
       static_cast<int>(proc_grid.size()) != NDIMS) {
     KWQFT_ERROR("global_lattice and proc_grid must have NDIMS elements");
   }
+  if (global_lattice[0] % proc_grid[0] != 0 ||
+      (global_lattice[0] / proc_grid[0]) % 2 != 0) {
+    KWQFT_ERROR(
+        "Local grid[0] must be even for even/odd ordering (global L0 divisible by 2 * proc_grid[0])");
+  }
 
   LatticeParams &p = PARAMS::params;
   p.mpi = true;

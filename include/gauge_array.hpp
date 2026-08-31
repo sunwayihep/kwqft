@@ -37,7 +37,7 @@ private:
   host_ViewT hostData_;     // Host mirror
   ArrayType arrayType_;     // Storage format
   MemoryLocation location_; // Where primary data resides
-  bool evenOdd_;            // Even/odd ordering
+  bool evenOdd_;            // Even/odd ordering (required; must be true)
   int64_t size_;            // Number of links (int64_t for large lattices)
   bool allocated_;          // Whether memory is allocated
 
@@ -49,7 +49,7 @@ public:
 
   // Constructor with parameters
   GaugeArray(ArrayType type, MemoryLocation loc, int64_t sizeIn,
-             bool evenOdd = false)
+             bool evenOdd = true)
       : arrayType_(type), location_(loc), evenOdd_(evenOdd), size_(sizeIn),
         allocated_(false) {
     allocate(sizeIn);
@@ -141,6 +141,9 @@ public:
     if (allocated_) {
       KWQFT_WARNING("Array already allocated");
       return;
+    }
+    if (!evenOdd_) {
+      KWQFT_ERROR("GaugeArray requires even/odd (checkerboard) ordering");
     }
 
     size_ = sizeIn;
