@@ -79,7 +79,7 @@ void mpi_setup_cartesian(const int proc_grid[NDIMS], const int global_grid[NDIMS
     dims[d] = proc_grid[d];
     periods[d] = 1;
   }
-  int reorder = 1;
+  int reorder = 0;
   MPI_Comm old = g_cart_comm;
   MPI_Cart_create(MPI_COMM_WORLD, NDIMS, dims, periods, reorder, &g_cart_comm);
   if (old != MPI_COMM_NULL && old != MPI_COMM_WORLD) {
