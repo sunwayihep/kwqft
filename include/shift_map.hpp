@@ -65,6 +65,10 @@ public:
     return shift(field, layout, static_cast<int>(dir), mu);
   }
 
+  /// CUDA requires lambdas in public member functions (NVCC extended-lambda rule).
+  void shift_impl(const ComplexT *src, ComplexT *dst, const Layout &layout,
+                  int shift_mu, int isign);
+
 private:
   LatticeParams p_{};
   int64_t face_vol_[NDIMS]{};
@@ -80,8 +84,6 @@ private:
 
   void prepare_site_elems(int site_elems);
   ComplexT *alloc_dense_buf(int site_elems);
-  void shift_impl(const ComplexT *src, ComplexT *dst, const Layout &layout,
-                  int shift_mu, int isign);
 };
 
 /// Global shift map (QDPXX-style; initialized by \ref initializeParams).

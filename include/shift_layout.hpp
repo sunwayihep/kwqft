@@ -30,6 +30,7 @@ template <typename Real> struct ShiftLayout {
   int component{0};
   int64_t volume{0};
 
+  KOKKOS_INLINE_FUNCTION
   static ShiftLayout dense(int site_elems) {
     ShiftLayout l;
     l.kind = SHIFT_LAYOUT_DENSE_EO;
@@ -37,6 +38,7 @@ template <typename Real> struct ShiftLayout {
     return l;
   }
 
+  KOKKOS_INLINE_FUNCTION
   static ShiftLayout gauge_soa(int64_t soa_stride, int link_dir, int64_t volume) {
     ShiftLayout l;
     l.kind = SHIFT_LAYOUT_GAUGE_SOA;
