@@ -12,9 +12,8 @@
 #include "complex.hpp"
 #include "constants.hpp"
 #include "gauge_array.hpp"
-#include "gauge_halo.hpp"
+#include "gauge_ops.hpp"
 #include "index.hpp"
-#include "neighbor_access.hpp"
 #include "shift.hpp"
 #include "kwqft_common.hpp"
 #include "perf_stats.hpp"
@@ -26,74 +25,8 @@
 namespace kwqft {
 
 //=============================================================================
-// Device functions for staple calculation
+// Device functions for staple calculation (see gauge_ops.hpp)
 //=============================================================================
-
-/**
- * @brief Calculate staple at a given site and direction
- *
- * Site-based link gather: periodic torus when \c halo is null; MPI subdomain
- * with \ref GaugeHaloDevice when \c params.mpi and \c halo non-null.
- */
-template <typename Real>
-KOKKOS_INLINE_FUNCTION MatrixSun<Real, NCOLORS>
-calculateStaple(const Complex<Real> *gaugePtr, int64_t soa_stride,
-                const GaugeHaloDevice<Real> &halo, int64_t id, int oddbit,
-                int mu, const LatticeParams &params) {
-  using MatrixT = MatrixSun<Real, NCOLORS>;
-
-  MatrixT staple = MatrixT::zero();
-  int x[NDIMS];
-  eo_to_coords(id, oddbit, x, params);
-
-  MatrixT u_nu_x, u_mu_x_plus_nu, u_nu_x_plus_mu, tmp;
-
-  for (int nu = 0; nu < NDIMS; ++nu) {
-    if (nu == mu)
-      continue;
-
-    const Real coeff = static_cast<Real>(params.coeffs[mu][nu]);
-
-    int xa[NDIMS], xb[NDIMS], xc[NDIMS], xm[NDIMS], xz[NDIMS];
-    for (int d = 0; d < NDIMS; ++d) {
-      xa[d] = x[d];
-    }
-    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xa, nu, params, u_nu_x);
-    for (int d = 0; d < NDIMS; ++d) {
-      xb[d] = x[d];
-    }
-    xb[nu]++;
-    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xb, mu, params,
-                          u_mu_x_plus_nu);
-    for (int d = 0; d < NDIMS; ++d) {
-      xc[d] = x[d];
-    }
-    xc[mu]++;
-    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xc, nu, params,
-                          u_nu_x_plus_mu);
-    tmp = u_nu_x * u_mu_x_plus_nu * u_nu_x_plus_mu.dagger();
-    staple += tmp * coeff;
-
-    for (int d = 0; d < NDIMS; ++d) {
-      xm[d] = x[d];
-    }
-    xm[nu]--;
-    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xm, nu, params, u_nu_x);
-    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xm, mu, params,
-                          u_mu_x_plus_nu);
-    for (int d = 0; d < NDIMS; ++d) {
-      xz[d] = x[d];
-    }
-    xz[mu]++;
-    xz[nu]--;
-    loadGaugeLinkAtCoords(gaugePtr, soa_stride, halo, xz, nu, params,
-                          u_nu_x_plus_mu);
-    tmp = u_nu_x.dagger() * u_mu_x_plus_nu * u_nu_x_plus_mu;
-    staple += tmp * coeff;
-  }
-
-  return staple;
-}
 
 /**
  * @brief Pseudo-heatbath update for SU(N)
@@ -276,14 +209,12 @@ private:
   GaugeT &gauge_;
   RandomGenerator &rng_;
   LatticeParams params_;
-  GaugeHaloBuffers<Real> *halo_;
   double time_;
   int64_t size_;
 
 public:
-  HeatBath(GaugeT &gauge, RandomGenerator &rng, const LatticeParams &params,
-         GaugeHaloBuffers<Real> *halo = nullptr)
-      : gauge_(gauge), rng_(rng), params_(params), halo_(halo), time_(0.0) {
+  HeatBath(GaugeT &gauge, RandomGenerator &rng, const LatticeParams &params)
+      : gauge_(gauge), rng_(rng), params_(params), time_(0.0) {
     size_ = params.half_volume;
   }
 
@@ -304,22 +235,18 @@ public:
     for (int parity = 0; parity < 2; ++parity) {
       // Loop over directions
       for (int mu = 0; mu < NDIMS; ++mu) {
-        if (halo_ && params.mpi) {
-          halo_->exchange(gaugeView.data(), size, params);
-        }
-        const GaugeHaloDevice<Real> halo_dev =
-            (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
+        const LatticeGaugeLinks<Real> u(gaugeView.data(), size);
+        const StapleShifts<Real> staple_sh = make_staple_shifts(u, mu);
+
         Kokkos::parallel_for(
             "HeatBath", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
-              // Get random generator for this thread
               auto gen = pool.get_state();
 
               ComplexT *gaugePtr = gaugeView.data();
 
-              // Calculate staple (sum of neighboring plaquettes)
-              MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_dev,
-                                                     id, parity, mu, params);
+              MatrixT staple =
+                  staple_site(staple_sh, id, parity, mu, params);
 
               // Get current link index
               int64_t idxoddbit = id + parity * halfVol;
@@ -441,13 +368,11 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
-  GaugeHaloBuffers<Real> *halo_;
   double time_;
 
 public:
-  Overrelaxation(GaugeT &gauge, const LatticeParams &params,
-                 GaugeHaloBuffers<Real> *halo = nullptr)
-      : gauge_(gauge), params_(params), halo_(halo), time_(0.0) {}
+  Overrelaxation(GaugeT &gauge, const LatticeParams &params)
+      : gauge_(gauge), params_(params), time_(0.0) {}
 
   /**
    * @brief Run one sweep of overrelaxation
@@ -462,18 +387,16 @@ public:
 
     for (int parity = 0; parity < 2; ++parity) {
       for (int mu = 0; mu < NDIMS; ++mu) {
-        if (halo_ && params.mpi) {
-          halo_->exchange(gaugeView.data(), size, params);
-        }
-        const GaugeHaloDevice<Real> halo_dev =
-            (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
+        const LatticeGaugeLinks<Real> u(gaugeView.data(), size);
+        const StapleShifts<Real> staple_sh = make_staple_shifts(u, mu);
+
         Kokkos::parallel_for(
             "Overrelaxation", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
               ComplexT *gaugePtr = gaugeView.data();
 
-              MatrixT staple = calculateStaple<Real>(gaugePtr, size, halo_dev,
-                                                     id, parity, mu, params);
+              MatrixT staple =
+                  staple_site(staple_sh, id, parity, mu, params);
 
               int64_t idxoddbit = id + parity * halfVol;
               int64_t muvolume = mu * params.volume;

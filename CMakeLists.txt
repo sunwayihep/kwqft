@@ -19,7 +19,7 @@ option(KWQFT_ENABLE_OPENMP "Enable OpenMP backend" OFF)
 option(KWQFT_ENABLE_CUDA "Enable CUDA backend" OFF)
 option(KWQFT_ENABLE_HIP "Enable HIP backend" OFF)
 option(KWQFT_ENABLE_SYCL "Enable SYCL backend" OFF)
-option(KWQFT_USE_MPI "MPI parallel build (halo hooks; link MPI if ON)" OFF)
+option(KWQFT_USE_MPI "MPI parallel build (link MPI if ON)" OFF)
 
 # Lattice parameters (can be overridden at compile time)
 set(KWQFT_NCOLORS "3" CACHE STRING "Number of colors for SU(N)")
@@ -129,7 +129,7 @@ set(KWQFT_SOURCES
     src/reunitarize.cpp
     src/io_gauge.cpp
     src/mpi_layout.cpp
-    src/gauge_halo.cpp
+    src/shift_map.cpp
 )
 
 # Create library

@@ -8,7 +8,6 @@
 #include "io_gauge.hpp"
 #include "kwqft.hpp"
 #ifdef KWQFT_USE_MPI
-#include "gauge_halo.hpp"
 #include "mpi_layout.hpp"
 #include <mpi.h>
 #endif
@@ -284,22 +283,15 @@ template <typename Real> bool test_mpi_gauge_io_roundtrip() {
 
   auto &params = PARAMS::params;
 
-  std::unique_ptr<GaugeHaloBuffers<Real>> halo_storage;
-  GaugeHaloBuffers<Real> *halo_ptr = nullptr;
-  if (params.mpi) {
-    halo_storage = std::make_unique<GaugeHaloBuffers<Real>>(params);
-    halo_ptr = halo_storage.get();
-  }
-
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
                          params.volume * NDIMS, true);
   gauge.initCold();
 
   RandomGenerator rng(424242u + static_cast<unsigned int>(rank),
                     params.half_volume);
-  HeatBath<Real> heatbath(gauge, rng, params, halo_ptr);
+  HeatBath<Real> heatbath(gauge, rng, params);
   Reunitarize<Real> reunitarize(gauge, params);
-  Plaquette<Real> plaq(gauge, params, halo_ptr);
+  Plaquette<Real> plaq(gauge, params);
 
   const int n_sweeps = 3;
   for (int i = 0; i < n_sweeps; ++i) {
@@ -381,18 +373,11 @@ template <typename Real> bool test_mpi_polyakov_time_split() {
 
   auto &params = PARAMS::params;
 
-  std::unique_ptr<GaugeHaloBuffers<Real>> halo_storage;
-  GaugeHaloBuffers<Real> *halo_ptr = nullptr;
-  if (params.mpi) {
-    halo_storage = std::make_unique<GaugeHaloBuffers<Real>>(params);
-    halo_ptr = halo_storage.get();
-  }
-
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
                          params.volume * NDIMS, true);
   gauge.initCold();
 
-  PolyakovLoop<Real> polyakov(gauge, params, halo_ptr);
+  PolyakovLoop<Real> polyakov(gauge, params);
   polyakov.run();
 
   const Real cold_abs = polyakov.absValue();
@@ -401,7 +386,7 @@ template <typename Real> bool test_mpi_polyakov_time_split() {
 
   if (ok) {
     RandomGenerator rng(777u + static_cast<unsigned int>(rank), params.half_volume);
-    HeatBath<Real> heatbath(gauge, rng, params, halo_ptr);
+    HeatBath<Real> heatbath(gauge, rng, params);
     for (int i = 0; i < 5; ++i) {
       heatbath.run();
     }
@@ -422,6 +407,82 @@ template <typename Real> bool test_mpi_polyakov_time_split() {
   } else if (rank == 0) {
     printf("  FAILED: cold start |P| = %f (expected 1.0)\n",
            static_cast<double>(cold_abs));
+  }
+
+  int ok_int = ok ? 1 : 0;
+  MPI_Bcast(&ok_int, 1, MPI_INT, 0, MPI_COMM_WORLD);
+  return ok_int != 0;
+}
+
+template <typename Real> bool test_mpi_shift_heatbath() {
+  const int nproc = mpi_comm_size();
+  const int rank = mpi_comm_rank();
+
+  if (nproc < 2) {
+    if (rank == 0) {
+      printf("Testing MPI shift-based HeatBath...\n");
+      printf("  SKIPPED (need >= 2 MPI ranks)\n");
+    }
+    return true;
+  }
+  if (nproc != 2) {
+    if (rank == 0) {
+      printf("Testing MPI shift-based HeatBath...\n");
+      printf("  SKIPPED (need exactly 2 MPI ranks)\n");
+    }
+    return true;
+  }
+
+  if (rank == 0) {
+    printf("Testing MPI shift-based HeatBath...\n");
+  }
+
+  int proc_grid[NDIMS] = {2, 1, 1, 1};
+  std::vector<int> global_lattice(NDIMS, 8);
+  int global_lattice_arr[NDIMS];
+  for (int d = 0; d < NDIMS; ++d) {
+    global_lattice_arr[d] = global_lattice[d];
+  }
+
+  if (PARAMS::initialized) {
+    finalizeParams();
+  }
+  mpi_setup_cartesian(proc_grid, global_lattice_arr);
+  std::vector<int> pg(proc_grid, proc_grid + NDIMS);
+  initializeParamsDistributed(global_lattice, pg, 6.0, false);
+
+  auto &params = PARAMS::params;
+
+  GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
+                         params.volume * NDIMS, true);
+  gauge.initCold();
+
+  Plaquette<Real> plaq(gauge, params);
+  plaq.run();
+  const Real cold_plaq = plaq.value();
+
+  RandomGenerator rng(13579u + static_cast<unsigned int>(rank), params.half_volume);
+  HeatBath<Real> heatbath(gauge, rng, params);
+  for (int i = 0; i < 3; ++i) {
+    heatbath.run();
+  }
+  plaq.run();
+  const Real hot_plaq = plaq.value();
+
+  bool ok = std::abs(cold_plaq - Real(1)) <= Real(1e-6);
+  ok = ok && hot_plaq > Real(0.4) && hot_plaq < Real(0.95);
+
+  if (rank == 0) {
+    if (!ok) {
+      printf("  FAILED: cold plaquette = %f, after 3 sweeps = %f\n",
+             static_cast<double>(cold_plaq), static_cast<double>(hot_plaq));
+    } else {
+      printf("  Cold plaquette = %f (expected 1.0)\n",
+             static_cast<double>(cold_plaq));
+      printf("  After 3 shift-based sweeps plaquette = %f\n",
+             static_cast<double>(hot_plaq));
+      printf("  PASSED\n");
+    }
   }
 
   int ok_int = ok ? 1 : 0;
@@ -480,6 +541,10 @@ int main(int argc, char *argv[]) {
     else
       failed++;
     if (test_mpi_polyakov_time_split<double>())
+      passed++;
+    else
+      failed++;
+    if (test_mpi_shift_heatbath<double>())
       passed++;
     else
       failed++;

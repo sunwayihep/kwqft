@@ -146,6 +146,26 @@ KOKKOS_INLINE_FUNCTION void indexNdEo(int x[ND], int64_t id, int oddbit,
   x[0] = static_cast<int>((id * 2 + xodd) - id / (X[0] / 2) * X[0]);
 }
 
+/// Convert site coordinates to even/odd linear index (inverse of \ref indexNdEo).
+template <int ND = NDIMS>
+KOKKOS_INLINE_FUNCTION int64_t coords_to_eo_idx(const int x[ND],
+                                                const LatticeParams &p) {
+  int64_t pos = 0;
+  int64_t factor = 1;
+  for (int i = 0; i < ND; ++i) {
+    pos += static_cast<int64_t>(x[i]) * factor;
+    factor *= static_cast<int64_t>(p.grid[i]);
+  }
+  pos /= 2;
+  int sumX = 0;
+  for (int i = 0; i < ND; ++i) {
+    sumX += x[i];
+  }
+  const int oddbit1 = sumX & 1;
+  pos += static_cast<int64_t>(oddbit1) * p.half_volume;
+  return pos;
+}
+
 /**
  * @brief Get neighbor index in even/odd ordering
  * Returns the index in the half-volume array with parity offset

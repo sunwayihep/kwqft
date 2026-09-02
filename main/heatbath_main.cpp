@@ -12,9 +12,6 @@
 
 #include "io_gauge.hpp"
 #include "kwqft.hpp"
-#ifdef KWQFT_USE_MPI
-#include "gauge_halo.hpp"
-#endif
 #include "mpi_layout.hpp"
 
 #include <Kokkos_Core.hpp>
@@ -161,15 +158,6 @@ bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
 template <typename Real> void run_heatbath(int ntraj) {
   auto &params = PARAMS::params;
 
-#ifdef KWQFT_USE_MPI
-  std::unique_ptr<GaugeHaloBuffers<Real>> halo_storage;
-  GaugeHaloBuffers<Real> *halo_ptr = nullptr;
-  if (params.mpi) {
-    halo_storage = std::make_unique<GaugeHaloBuffers<Real>>(params);
-    halo_ptr = halo_storage.get();
-  }
-#endif
-
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
                          params.volume * NDIMS, true);
   if (mpi_comm_rank() == 0) {
@@ -184,15 +172,9 @@ template <typename Real> void run_heatbath(int ntraj) {
   }
   gauge.initCold();
 
-#ifdef KWQFT_USE_MPI
-  HeatBath<Real> heatbath(gauge, rng, params, halo_ptr);
-  Plaquette<Real> plaquette(gauge, params, halo_ptr);
-  PolyakovLoop<Real> polyakov(gauge, params, halo_ptr);
-#else
   HeatBath<Real> heatbath(gauge, rng, params);
   Plaquette<Real> plaquette(gauge, params);
   PolyakovLoop<Real> polyakov(gauge, params);
-#endif
   Reunitarize<Real> reunitarize(gauge, params);
 
   plaquette.run();

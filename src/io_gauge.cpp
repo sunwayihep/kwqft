@@ -7,7 +7,6 @@
 #include "index.hpp"
 #include "io_gauge.hpp"
 #include "mpi_layout.hpp"
-#include "neighbor_access.hpp"
 #include "shift.hpp"
 
 #include <fstream>

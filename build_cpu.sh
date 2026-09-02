@@ -11,6 +11,7 @@ mkdir -p ${DIR} && cd ${DIR}
 
 cmake .. -DKWQFT_NCOLORS=${NCOLORS} -DKWQFT_NDIMS=${NDIMS} \
 	-DCMAKE_BUILD_TYPE=Release -DKWQFT_ENABLE_OPENMP=ON \
+	-DKWQFT_USE_MPI=ON \
 	-DKOKKOS_SOURCE_DIR="../kokkos"
 
 make -j

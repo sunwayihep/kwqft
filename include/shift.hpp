@@ -2,13 +2,13 @@
  * @file shift.hpp
  * @brief Lattice shift helpers (single-process copy semantics)
  *
- * Mirrors QDP/Chroma-style \c shift(field, dir, mu): on a site x,
- *   (shift(F, FORWARD,  mu))(x) = F(x + e_mu)
- *   (shift(F, BACKWARD, mu))(x) = F(x - e_mu)
+ * Mirrors QDPXX \c shift(field, dir, mu) with
+ *   dest(x) = src(x + isign * e_mu)   (isign = FORWARD/BACKWARD)
+ * FORWARD means the source site is in the +mu direction from the destination.
  *
- * Storage uses even/odd (checkerboard) indices \c idx_eo in [0, volume),
- * matching \c indexNdNeigEo. A future MPI implementation can replace the
- * index mapping with halo exchange + local gather (cf. QDP \c Map).
+ * Storage uses even/odd (checkerboard) indices \c idx_eo in [0, volume).
+ * MPI subdomain shifts use the global \ref shiftMap with a \ref ShiftLayout
+ * descriptor (initialized by \ref initializeParams).
  */
 
 #ifndef KWQFT_SHIFT_HPP
@@ -23,8 +23,8 @@ namespace kwqft {
 
 /// Chroma/QDP-compatible shift directions for \ref shift_eo.
 enum ShiftDirection : int {
-  SHIFT_BACKWARD = -1,
-  SHIFT_FORWARD = 1,
+  BACKWARD = -1,
+  FORWARD = 1,
 };
 
 /**
@@ -65,50 +65,58 @@ loadGaugeLinkSoa(const Complex<Real> *gaugePtr, int64_t idx_eo, int dir,
 }
 
 /**
- * @brief Single-process bulk forward shift of one direction's links.
+ * @brief Single-process bulk forward shift of a dense EO field.
  *
- * Fills \c dst so that \c dst(x) = \c src(shift(x, FORWARD, mu))
- *         = \c src(x + e_mu) in EO labeling, matching QDP/Chroma \c shift(., FORWARD, mu).
- *
- * Both views must have length \c p.volume * NCOLORS * NCOLORS (one matrix per
- * EO site, dense layout). This is a building block for a future MPI halo path
- * where \c shift_eo is replaced by communicator gathers.
+ * Fills \c dst so that \c dst(x) = \c src(x + e_mu), i.e.
+ * QDPXX \c shift(src, FORWARD, mu).
  */
 template <typename SrcView, typename DstView>
-void shift_link_field_forward_eo(const SrcView &src, const DstView &dst, int mu,
-                                 const LatticeParams &p) {
+void shift_field_forward_eo(const SrcView &src, const DstView &dst, int mu,
+                            int site_elems, const LatticeParams &p) {
   const int64_t vol = p.volume;
-  const int64_t mat_elems = static_cast<int64_t>(NCOLORS * NCOLORS);
+  const int64_t se = static_cast<int64_t>(site_elems);
   Kokkos::parallel_for(
-      "shift_link_field_forward_eo",
+      "shift_field_forward_eo",
       Kokkos::RangePolicy<DefaultExecSpace>(0, vol), KOKKOS_LAMBDA(int64_t idx_eo) {
-        const int64_t src_idx = shift_eo(idx_eo, mu, SHIFT_FORWARD, p);
-        for (int64_t k = 0; k < mat_elems; ++k) {
-          dst(idx_eo * mat_elems + k) = src(src_idx * mat_elems + k);
+        const int64_t src_idx = shift_eo(idx_eo, mu, FORWARD, p);
+        for (int64_t k = 0; k < se; ++k) {
+          dst(idx_eo * se + k) = src(src_idx * se + k);
         }
       });
   Kokkos::fence();
 }
 
 /**
- * @brief Single-process bulk backward shift of one direction's links.
- *
- * \c dst(x) = \c src(x - e_mu) = \c src(shift_eo(x, mu, BACKWARD)).
+ * @brief Single-process bulk backward shift of a dense EO field.
  */
 template <typename SrcView, typename DstView>
-void shift_link_field_backward_eo(const SrcView &src, const DstView &dst, int mu,
-                                  const LatticeParams &p) {
+void shift_field_backward_eo(const SrcView &src, const DstView &dst, int mu,
+                             int site_elems, const LatticeParams &p) {
   const int64_t vol = p.volume;
-  const int64_t mat_elems = static_cast<int64_t>(NCOLORS * NCOLORS);
+  const int64_t se = static_cast<int64_t>(site_elems);
   Kokkos::parallel_for(
-      "shift_link_field_backward_eo",
+      "shift_field_backward_eo",
       Kokkos::RangePolicy<DefaultExecSpace>(0, vol), KOKKOS_LAMBDA(int64_t idx_eo) {
-        const int64_t src_idx = shift_eo(idx_eo, mu, SHIFT_BACKWARD, p);
-        for (int64_t k = 0; k < mat_elems; ++k) {
-          dst(idx_eo * mat_elems + k) = src(src_idx * mat_elems + k);
+        const int64_t src_idx = shift_eo(idx_eo, mu, BACKWARD, p);
+        for (int64_t k = 0; k < se; ++k) {
+          dst(idx_eo * se + k) = src(src_idx * se + k);
         }
       });
   Kokkos::fence();
+}
+
+/// Gauge link forward shift (dense EO, one matrix per site).
+template <typename SrcView, typename DstView>
+void shift_link_field_forward_eo(const SrcView &src, const DstView &dst, int mu,
+                                 const LatticeParams &p) {
+  shift_field_forward_eo(src, dst, mu, NCOLORS * NCOLORS, p);
+}
+
+/// Gauge link backward shift (dense EO, one matrix per site).
+template <typename SrcView, typename DstView>
+void shift_link_field_backward_eo(const SrcView &src, const DstView &dst, int mu,
+                                  const LatticeParams &p) {
+  shift_field_backward_eo(src, dst, mu, NCOLORS * NCOLORS, p);
 }
 
 } // namespace kwqft

@@ -12,13 +12,13 @@
 #include "complex.hpp"
 #include "constants.hpp"
 #include "gauge_array.hpp"
-#include "gauge_halo.hpp"
+#include "gauge_ops.hpp"
 #include "index.hpp"
 #include "kwqft_common.hpp"
 #include "matrixsun.hpp"
-#include "neighbor_access.hpp"
 #include "perf_stats.hpp"
 #include "shift.hpp"
+#include "lattice_color_matrix_algebra.hpp"
 #include "mpi_layout.hpp"
 
 #ifdef KWQFT_USE_MPI
@@ -35,10 +35,8 @@ namespace kwqft {
 /**
  * @brief Calculate plaquette expectation value
  *
- * Computes the average plaquette = (1/Nc) * Re Tr(U_plaq)
- * where U_plaq = U_mu(x) * U_nu(x+mu) * U_mu^\dagger(x+nu) * U_nu^\dagger(x)
- *
- * Uses even-odd (checkerboard) storage format
+ * Computes the average plaquette using the shift:
+ *   Tr( U_mu * shift(U_nu,+mu) * adj(shift(U_mu,+nu)) * adj(U_nu) )
  */
 template <typename Real> class Plaquette {
 public:
@@ -49,91 +47,47 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
-  GaugeHaloBuffers<Real> *halo_;
   Real plaqValue_;
   Real spatialValue_;
   Real temporalValue_;
   double time_;
 
 public:
-  Plaquette(GaugeT &gauge, const LatticeParams &params,
-            GaugeHaloBuffers<Real> *halo = nullptr)
-      : gauge_(gauge), params_(params), halo_(halo), plaqValue_(0),
+  Plaquette(GaugeT &gauge, const LatticeParams &params)
+      : gauge_(gauge), params_(params), plaqValue_(0),
         spatialValue_(0), temporalValue_(0), time_(0) {}
 
   /**
-   * @brief Compute the plaquette using even-odd storage format
+   * @brief Compute the plaquette.
    */
   void run() {
     Kokkos::Timer timer;
 
     auto gaugeView = gauge_.getView();
-    auto params = params_;
     int64_t size = gauge_.size();
-    int64_t volume = params.volume;
-    int64_t halfVol = params.half_volume;
-
-    if (halo_ && params.mpi) {
-      halo_->exchange(gaugeView.data(), size, params);
-    }
-    const GaugeHaloDevice<Real> halo_dev =
-        (halo_ && params.mpi) ? halo_->device_view() : GaugeHaloDevice<Real>{};
 
     Real plaqSum = 0;
     Real spatialSum = 0;
     Real temporalSum = 0;
 
-    Kokkos::parallel_reduce(
-        "Plaquette", Kokkos::RangePolicy<DefaultExecSpace>(0, volume),
-        KOKKOS_LAMBDA(const int64_t idd, Real &lsum, Real &ssum, Real &tsum) {
-          (void)lsum;
-          ComplexT *gaugePtr = gaugeView.data();
+    const LatticeGaugeLinks<Real> u(gaugeView.data(), size);
 
-          int oddbit = 0;
-          int64_t id = idd;
-          if (idd >= halfVol) {
-            oddbit = 1;
-            id = idd - halfVol;
-          }
+    for (int mu = 1; mu < NDIMS; ++mu) {
+      for (int nu = 0; nu < mu; ++nu) {
+        beginShiftSweep<Real>();
+        Real pairSum = realTraceSum(
+            u[mu] * shift(u[nu], FORWARD, mu) *
+                adj(shift(u[mu], FORWARD, nu)) * adj(u[nu]),
+            "Plaquette");
 
-          int x[NDIMS];
-          eo_to_coords(id, oddbit, x, params);
-
-          for (int mu = 0; mu < NDIMS; ++mu) {
-            MatrixT uMuX;
-            loadGaugeLinkAtCoords(gaugePtr, size, halo_dev, x, mu, params,
-                                  uMuX);
-            int xpmu[NDIMS];
-            for (int d = 0; d < NDIMS; ++d) {
-              xpmu[d] = x[d];
-            }
-            xpmu[mu]++;
-
-            for (int nu = mu + 1; nu < NDIMS; ++nu) {
-              MatrixT uNuXmu, uMuXnu, uNuX;
-              loadGaugeLinkAtCoords(gaugePtr, size, halo_dev, xpmu, nu, params,
-                                    uNuXmu);
-              int xpnu[NDIMS];
-              for (int d = 0; d < NDIMS; ++d) {
-                xpnu[d] = x[d];
-              }
-              xpnu[nu]++;
-              loadGaugeLinkAtCoords(gaugePtr, size, halo_dev, xpnu, mu, params,
-                                    uMuXnu);
-              loadGaugeLinkAtCoords(gaugePtr, size, halo_dev, x, nu, params,
-                                    uNuX);
-              MatrixT link = uNuXmu * uMuXnu.dagger() * uNuX.dagger();
-              Real tr = (uMuX * link).realtrace();
-
-              if (nu == NDIMS - 1) {
-                tsum += tr;
-              } else {
-                ssum += tr;
-              }
-            }
-          }
-        },
-        plaqSum, spatialSum, temporalSum);
+        plaqSum += pairSum;
+        if (mu == t_dir() || nu == t_dir()) {
+          temporalSum += pairSum;
+        } else {
+          spatialSum += pairSum;
+        }
+      }
+    }
 
 #ifdef KWQFT_USE_MPI
     if (params_.mpi) {
@@ -238,15 +192,12 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
-  GaugeHaloBuffers<Real> *halo_;
   ComplexT polyValue_;
   double time_;
 
 public:
-  PolyakovLoop(GaugeT &gauge, const LatticeParams &params,
-               GaugeHaloBuffers<Real> *halo = nullptr)
-      : gauge_(gauge), params_(params), halo_(halo), polyValue_(0, 0),
-        time_(0) {}
+  PolyakovLoop(GaugeT &gauge, const LatticeParams &params)
+      : gauge_(gauge), params_(params), polyValue_(0, 0), time_(0) {}
 
   /**
    * @brief Compute the Polyakov loop
@@ -257,10 +208,6 @@ public:
     auto gaugeView = gauge_.getView();
     auto params = params_;
     int64_t size = gauge_.size();
-
-    if (halo_ && params.mpi) {
-      halo_->exchange(gaugeView.data(), size, params);
-    }
 
     int64_t spatialVolume = 1;
     for (int i = 0; i < NDIMS - 1; ++i) {

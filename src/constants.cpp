@@ -5,6 +5,7 @@
 
 #include "constants.hpp"
 #include "mpi_layout.hpp"
+#include "shift_map.hpp"
 #include <cstdio>
 #include <memory>
 
@@ -45,6 +46,9 @@ void initializeParams(const std::vector<int> &lattice_size, double beta,
 
   PARAMS::params.initialize(lattice_size, beta, xi0);
   PARAMS::initialized = true;
+
+  initializeShiftMap<double>(PARAMS::params);
+  initializeShiftMap<float>(PARAMS::params);
 
   // Initialize device params view (lazy)
   auto &device_params = get_device_params();
@@ -129,6 +133,9 @@ void initializeParamsDistributed(const std::vector<int> &global_lattice,
 
   PARAMS::initialized = true;
 
+  initializeShiftMap<double>(PARAMS::params);
+  initializeShiftMap<float>(PARAMS::params);
+
   auto &device_params = get_device_params();
   auto &host_mirror = get_host_params_mirror();
   host_mirror() = PARAMS::params;
@@ -202,6 +209,8 @@ void print_params() {
 }
 
 void finalizeParams() {
+  finalizeShiftMap<double>();
+  finalizeShiftMap<float>();
   // Release Kokkos views before Kokkos::finalize()
   s_host_params_mirror.reset();
   s_device_params.reset();
