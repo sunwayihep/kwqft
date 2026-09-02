@@ -112,8 +112,6 @@ void save_gauge_binary(const GaugeArray<Real> &gauge, const std::string &filenam
 
 #ifdef KWQFT_USE_MPI
   const bool mpi_save = p.mpi && p.nproc > 1;
-#else
-  const bool mpi_save = false;
 #endif
 
   std::ofstream fileout;
@@ -233,8 +231,6 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
 
 #ifdef KWQFT_USE_MPI
   const bool mpi_load = p.mpi && p.nproc > 1;
-#else
-  const bool mpi_load = false;
 #endif
 
   const int link_bytes =

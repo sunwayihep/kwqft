@@ -263,11 +263,11 @@ public:
       auto host_poly = Kokkos::create_mirror_view(local_poly);
       Kokkos::deep_copy(host_poly, local_poly);
 
-      const int nbytes =
-          static_cast<int>(spatialVolume * static_cast<int64_t>(sizeof(MatrixT)));
       MatrixT *poly_ptr = host_poly.data();
 
 #ifdef KWQFT_USE_MPI
+      const int nbytes =
+          static_cast<int>(spatialVolume * static_cast<int64_t>(sizeof(MatrixT)));
       if (t_coord > 0) {
         std::vector<MatrixT> recv_poly(static_cast<size_t>(spatialVolume));
         const int rank_down = mpi_cart_neighbor(tDir, -1);

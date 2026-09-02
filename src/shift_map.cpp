@@ -19,11 +19,8 @@ namespace kwqft {
 namespace {
 
 template <typename Real> struct ShiftMapHolder {
-  static std::unique_ptr<ShiftMap<Real>> instance;
+  inline static std::unique_ptr<ShiftMap<Real>> instance;
 };
-
-template <typename Real>
-std::unique_ptr<ShiftMap<Real>> ShiftMapHolder<Real>::instance;
 
 } // namespace
 
@@ -65,6 +62,7 @@ KOKKOS_INLINE_FUNCTION int64_t tangential_face_index(const int x[NDIMS], int mu,
   return idx;
 }
 
+#ifdef KWQFT_USE_MPI
 KOKKOS_INLINE_FUNCTION void face_coords(int fidx, int mu, int face_val,
                                         int x[NDIMS], const LatticeParams &p) {
   int64_t t = fidx;
@@ -77,6 +75,7 @@ KOKKOS_INLINE_FUNCTION void face_coords(int fidx, int mu, int face_val,
     }
   }
 }
+#endif
 
 } // namespace
 
