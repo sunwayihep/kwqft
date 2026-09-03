@@ -151,7 +151,7 @@ extern bool initialized;
 // Note: Kokkos Views cannot be global variables because they require
 // Kokkos::initialize() to be called first. We use pointers with lazy init.
 using ParamsView = Kokkos::View<LatticeParams, DefaultMemSpace>;
-using ParamsHostView = typename ParamsView::HostMirror;
+using ParamsHostView = typename ParamsView::host_mirror_type;
 
 /**
  * @brief Get the device parameters view (lazy initialization)

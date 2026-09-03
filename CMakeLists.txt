@@ -1,13 +1,15 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.22)
 project(KWQFT CXX)
 
 # KWQFT - Kokkos Ken Wilson Quantum Field Theory
 # Lattice gauge theory library with performance portability
 
-# C++ standard
-set(CMAKE_CXX_STANDARD 17)
+# C++ standard (Kokkos 5.x requires C++20)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# Ensure in-tree Kokkos picks up C++20 (not a leftover C++17 cache from older builds)
+set(Kokkos_CXX_STANDARD "20" CACHE STRING "C++ standard for Kokkos" FORCE)
 
 # Build type
 if(NOT CMAKE_BUILD_TYPE)
@@ -87,7 +89,7 @@ else()
     FetchContent_Declare(
         kokkos
         GIT_REPOSITORY https://github.com/kokkos/kokkos.git
-        GIT_TAG 4.7.01
+        GIT_TAG 5.2.1
     )
     FetchContent_MakeAvailable(kokkos)
 endif()

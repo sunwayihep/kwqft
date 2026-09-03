@@ -30,7 +30,7 @@ public:
   using ComplexT = Complex<Real>;
   using MatrixT = MatrixSun<Real, NCOLORS>;
   using ViewT = Kokkos::View<ComplexT *, DefaultMemSpace>;
-  using host_ViewT = typename ViewT::HostMirror;
+  using host_ViewT = typename ViewT::host_mirror_type;
 
 private:
   ViewT data_;              // Device data

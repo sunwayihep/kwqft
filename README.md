@@ -20,9 +20,9 @@ KWQFT is a lattice gauge theory library based on the Kokkos programming model, i
 
 ### Dependencies
 
-- CMake >= 3.16
-- C++17 compatible compiler
-- Kokkos >= 4.0
+- CMake >= 3.22
+- C++20 compatible compiler
+- Kokkos >= 5.0 (C++20 required)
 
 ### Obtaining Kokkos Source Code (Offline Environment)
 
@@ -31,11 +31,11 @@ If the server cannot access GitHub, you need to download the Kokkos source code 
 ```bash
 # Download on a machine with network access
 git clone https://github.com/kokkos/kokkos.git
-cd kokkos && git checkout 4.7.01
+cd kokkos && git checkout 5.2.1
 
 # Optional: Download KokkosKernels
 git clone https://github.com/kokkos/kokkos-kernels.git
-cd kokkos-kernels && git checkout 4.7.01
+cd kokkos-kernels && git checkout 5.2.1
 
 # Then copy the directories to the target server
 ```

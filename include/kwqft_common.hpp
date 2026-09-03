@@ -89,7 +89,7 @@ template <typename T> using View1D = Kokkos::View<T *, DefaultMemSpace>;
 
 template <typename T> using HostView1D = Kokkos::View<T *, HostMemSpace>;
 
-template <typename T> using MirrorView1D = typename View1D<T>::HostMirror;
+template <typename T> using MirrorView1D = typename View1D<T>::host_mirror_type;
 
 // 2D Views
 template <typename T> using View2D = Kokkos::View<T **, DefaultMemSpace>;
