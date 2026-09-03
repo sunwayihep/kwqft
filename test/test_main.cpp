@@ -26,6 +26,15 @@ void reset_and_initialize_params(const std::vector<int> &lattice_size,
   initializeParams(lattice_size, beta, false, xi0);
 }
 
+/// Fill proc_grid with 1s, then set proc_grid[split_dim] = nproc_along_dim.
+inline void fill_proc_grid(int proc_grid[NDIMS], int split_dim,
+                           int nproc_along_dim = 2) {
+  for (int d = 0; d < NDIMS; ++d) {
+    proc_grid[d] = 1;
+  }
+  proc_grid[split_dim] = nproc_along_dim;
+}
+
 template <typename Real> bool test_complex() {
   printf("Testing Complex<Real>...\n");
 
@@ -267,7 +276,8 @@ template <typename Real> bool test_mpi_gauge_io_roundtrip() {
     printf("Testing MPI gauge configuration I/O round-trip...\n");
   }
 
-  int proc_grid[NDIMS] = {2, 1, 1, 1};
+  int proc_grid[NDIMS];
+  fill_proc_grid(proc_grid, 0, 2); // split along x
   std::vector<int> global_lattice(NDIMS, 4);
   int global_lattice_arr[NDIMS];
   for (int d = 0; d < NDIMS; ++d) {
@@ -356,7 +366,8 @@ template <typename Real> bool test_mpi_polyakov_time_split() {
     printf("Testing MPI Polyakov loop (time direction split)...\n");
   }
 
-  int proc_grid[NDIMS] = {1, 1, 1, 2};
+  int proc_grid[NDIMS];
+  fill_proc_grid(proc_grid, NDIMS - 1, 2); // split along time
   std::vector<int> global_lattice(NDIMS, 4);
   global_lattice[NDIMS - 1] = 8;
   int global_lattice_arr[NDIMS];
@@ -437,7 +448,8 @@ template <typename Real> bool test_mpi_shift_heatbath() {
     printf("Testing MPI shift-based HeatBath...\n");
   }
 
-  int proc_grid[NDIMS] = {2, 1, 1, 1};
+  int proc_grid[NDIMS];
+  fill_proc_grid(proc_grid, 0, 2); // split along x
   std::vector<int> global_lattice(NDIMS, 8);
   int global_lattice_arr[NDIMS];
   for (int d = 0; d < NDIMS; ++d) {

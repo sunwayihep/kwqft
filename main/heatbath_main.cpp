@@ -36,11 +36,11 @@ void print_usage(const char *prog_name) {
   printf("    -ntraj N                       number of trajectories (required)\n");
   printf("    -xi0 X                         bare anisotropy (default 1.0)\n");
   printf("  NDIMS = %d.  -h, --help\n", NDIMS);
-  printf("\nExample (serial): %s -latt 8 8 8 16 -beta 6.0 -ntraj 100\n",
-         prog_name);
-  printf("Example (MPI, 8 ranks): mpirun -np 8 %s -geom 1 2 2 2 -latt 4 4 "
-         "4 8 -beta 6.0 -ntraj 10\n",
-         prog_name);
+  printf("\nExample (serial): %s -latt L1 ... L_%d -beta 6.0 -ntraj 100\n",
+         prog_name, NDIMS);
+  printf("Example (MPI): mpirun -np P %s -geom n_1 ... n_%d -latt L_1 ... L_%d"
+         " -beta 6.0 -ntraj 100\n", prog_name, NDIMS, NDIMS);
+  printf("  (∏ n_i = P, each L_i divisible by n_i)\n");
 }
 
 namespace {
