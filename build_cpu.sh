@@ -1,6 +1,6 @@
 #!/bin/bash
 # KWQFT - Kokkos Ken Wilson Quantum Field Theory
-# Build script for CPU (OpenMP backend)
+# Build script for CPU (MPI + OpenMP backend)
 
 NCOLORS=3
 NDIMS=4
