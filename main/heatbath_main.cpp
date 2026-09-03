@@ -6,8 +6,11 @@
  * depending on the build configuration
  *
  * CLI (order-independent): \c -geom, \c -latt, \c -beta, \c -ntraj,
- * optional \c -xi0. MPI: \c mpirun -np P with \c ∏ geom_i = P and
- * global \c L_i divisible by \c geom_i (Chroma-style).
+ * optional \c -xi0, \c -nhb, \c -novr, \c -nsave. MPI: \c mpirun -np P with
+ * \c ∏ geom_i = P and global \c L_i divisible by \c geom_i (Chroma-style).
+ *
+ * One trajectory = \c nhb pseudo-heatbath sweeps followed by \c novr
+ * overrelaxation sweeps, then reunitarize and measure.
  */
 
 #include "io_gauge.hpp"
@@ -35,26 +38,39 @@ void print_usage(const char *prog_name) {
   printf("    -beta B                        gauge coupling (required)\n");
   printf("    -ntraj N                       number of trajectories (required)\n");
   printf("    -xi0 X                         bare anisotropy (default 1.0)\n");
+  printf("    -nhb N                         heatbath sweeps per trajectory "
+         "(default 1, must be > 0)\n");
+  printf("    -novr N                        overrelaxation sweeps per "
+         "trajectory (default 4, may be 0)\n");
+  printf("    -nsave N                       save gauge config every N "
+         "trajectories (default 100)\n");
   printf("  NDIMS = %d.  -h, --help\n", NDIMS);
-  printf("\nExample (serial): %s -latt L1 ... L_%d -beta 6.0 -ntraj 100\n",
+  printf("\nExample (serial): %s -latt L1 ... L_%d -beta 6.0 -ntraj 100 "
+         "-nhb 1 -novr 4\n",
          prog_name, NDIMS);
   printf("Example (MPI): mpirun -np P %s -geom n_1 ... n_%d -latt L_1 ... L_%d"
-         " -beta 6.0 -ntraj 100\n", prog_name, NDIMS, NDIMS);
+         " -beta 6.0 -ntraj 100 -nhb 1 -novr 4\n",
+         prog_name, NDIMS, NDIMS);
   printf("  (∏ n_i = P, each L_i divisible by n_i)\n");
 }
 
 namespace {
 
 bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
-                       std::vector<int> &lattice_size, double &beta, int &ntraj,
-                       double &xi0, std::string &err) {
+                        std::vector<int> &lattice_size, double &beta, int &ntraj,
+                        double &xi0, int &nhb, int &novr, int &nsave,
+                        std::string &err) {
   for (int d = 0; d < NDIMS; ++d) {
     proc_grid[d] = 1;
   }
   xi0 = 1.0;
+  nhb = 1;
+  novr = 4;
+  nsave = 100;
   lattice_size.assign(NDIMS, 0);
   bool have_geom = false, have_latt = false, have_beta = false;
   bool have_ntraj = false, have_xi0 = false;
+  bool have_nhb = false, have_novr = false, have_nsave = false;
 
   for (int i = 1; i < argc;) {
     const char *a = argv[i];
@@ -142,6 +158,48 @@ bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
       i += 2;
       continue;
     }
+    if (std::strcmp(a, "-nhb") == 0) {
+      if (have_nhb) {
+        err = "duplicate -nhb";
+        return false;
+      }
+      if (i + 1 >= argc) {
+        err = "-nhb requires a value";
+        return false;
+      }
+      nhb = std::atoi(argv[i + 1]);
+      have_nhb = true;
+      i += 2;
+      continue;
+    }
+    if (std::strcmp(a, "-novr") == 0) {
+      if (have_novr) {
+        err = "duplicate -novr";
+        return false;
+      }
+      if (i + 1 >= argc) {
+        err = "-novr requires a value";
+        return false;
+      }
+      novr = std::atoi(argv[i + 1]);
+      have_novr = true;
+      i += 2;
+      continue;
+    }
+    if (std::strcmp(a, "-nsave") == 0) {
+      if (have_nsave) {
+        err = "duplicate -nsave";
+        return false;
+      }
+      if (i + 1 >= argc) {
+        err = "-nsave requires a value";
+        return false;
+      }
+      nsave = std::atoi(argv[i + 1]);
+      have_nsave = true;
+      i += 2;
+      continue;
+    }
     err = std::string("unknown or extra argument: ") + a;
     return false;
   }
@@ -155,7 +213,8 @@ bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
 
 } // namespace
 
-template <typename Real> void run_heatbath(int ntraj) {
+template <typename Real>
+void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
   auto &params = PARAMS::params;
 
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
@@ -173,6 +232,7 @@ template <typename Real> void run_heatbath(int ntraj) {
   gauge.initCold();
 
   HeatBath<Real> heatbath(gauge, rng, params);
+  Overrelaxation<Real> overrelax(gauge, params);
   Plaquette<Real> plaquette(gauge, params);
   PolyakovLoop<Real> polyakov(gauge, params);
   Reunitarize<Real> reunitarize(gauge, params);
@@ -187,7 +247,6 @@ template <typename Real> void run_heatbath(int ntraj) {
   }
 
   int num_warmup = 0;
-  int save_interval = 10;
   std::ostringstream prefix_stream;
   prefix_stream << "su" << NCOLORS << "_nd" << NDIMS << "_beta" << params.beta;
   for (int i = 0; i < NDIMS; ++i) {
@@ -205,7 +264,13 @@ template <typename Real> void run_heatbath(int ntraj) {
     Timer traj_timer;
     traj_timer.start();
 
-    heatbath.run();
+    // One trajectory: nhb heatbath sweeps + novr overrelaxation sweeps
+    for (int i = 0; i < nhb; ++i) {
+      heatbath.run();
+    }
+    for (int i = 0; i < novr; ++i) {
+      overrelax.run();
+    }
     reunitarize.run();
 
     traj_timer.stop();
@@ -216,9 +281,14 @@ template <typename Real> void run_heatbath(int ntraj) {
     plaquette.printValue();
     polyakov.printValue();
     if (mpi_comm_rank() == 0) {
-      printf("\nPerformance statistics:\n");
+      printf("\nPerformance statistics (last sweep of each update type):\n");
     }
-    heatbath.stat();
+    if (nhb > 0) {
+      heatbath.stat();
+    }
+    if (novr > 0) {
+      overrelax.stat();
+    }
     reunitarize.stat();
     plaquette.stat();
     polyakov.stat();
@@ -226,7 +296,7 @@ template <typename Real> void run_heatbath(int ntraj) {
       printf("Trajectory time: %.4f s\n\n", traj_timer.elapsed());
     }
 
-    if (traj > num_warmup && traj % save_interval == 0) {
+    if (traj > num_warmup && traj % nsave == 0) {
       std::string filename =
           save_prefix + "_cfg_" + std::to_string(traj) + ".bin";
       save_gauge_binary<double, double>(gauge, filename, false);
@@ -257,9 +327,12 @@ int main(int argc, char *argv[]) {
   double beta = 0.0;
   int ntraj = 0;
   double xi0 = 1.0;
+  int nhb = 1;
+  int novr = 4;
+  int nsave = 100;
   std::string cli_err;
   if (!parse_heatbath_cli(argc, argv, proc_grid, lattice_size, beta, ntraj, xi0,
-                          cli_err)) {
+                          nhb, novr, nsave, cli_err)) {
     if (mpi_comm_rank() == 0) {
       fprintf(stderr, "Error: %s\n", cli_err.c_str());
       print_usage(argv[0]);
@@ -270,6 +343,16 @@ int main(int argc, char *argv[]) {
 
   if (beta <= 0.0 || ntraj <= 0 || xi0 <= 0.0) {
     fprintf(stderr, "Error: invalid beta, ntraj, or xi0\n");
+    kwqft::finalize();
+    return 1;
+  }
+  if (nhb <= 0 || novr < 0) {
+    fprintf(stderr, "Error: need nhb > 0 and novr >= 0\n");
+    kwqft::finalize();
+    return 1;
+  }
+  if (nsave <= 0) {
+    fprintf(stderr, "Error: need nsave > 0\n");
     kwqft::finalize();
     return 1;
   }
@@ -294,11 +377,14 @@ int main(int argc, char *argv[]) {
     printf("Starting SU(%d) heatbath simulation\n", NCOLORS);
     printf("Beta: %f\n", beta);
     printf("Number of trajectories: %d\n", ntraj);
+    printf("Heatbath sweeps per trajectory (-nhb): %d\n", nhb);
+    printf("Overrelaxation sweeps per trajectory (-novr): %d\n", novr);
+    printf("Save interval (-nsave): %d\n", nsave);
     printf("Xi0 (bare anisotropy): %f\n", xi0);
     printf("\n");
   }
 
-  run_heatbath<double>(ntraj);
+  run_heatbath<double>(ntraj, nhb, novr, nsave);
 
   kwqft::finalize();
   return 0;

@@ -124,8 +124,10 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 ### Generating Gauge Field Configurations
 
 ```bash
-# Format: ./heatbath -latt L0 ... L{NDIMS-1} -beta beta -ntraj ntraj [-xi0 xi0] [-geom p0 ... p{NDIMS-1}]
+# Format: ./heatbath -latt L0 ... L{NDIMS-1} -beta beta -ntraj ntraj
+#          [-nhb nhb] [-novr novr] [-nsave nsave] [-xi0 xi0] [-geom p0 ... p{NDIMS-1}]
 ./heatbath -latt 8 8 8 16 -beta 6.0 -ntraj 1000
+./heatbath -latt 8 8 8 16 -beta 6.0 -ntraj 1000 -nhb 1 -novr 4 -nsave 100
 ./heatbath -beta 6.0 -ntraj 1000 -latt 8 8 8 16 -xi0 2.0
 ```
 
@@ -133,7 +135,13 @@ Parameter description:
 - `-latt`: Global lattice dimensions (`NDIMS` integers, e.g. x, y, z, t in 4D)
 - `-beta`: Gauge coupling constant
 - `-ntraj`: Number of trajectories
+- `-nhb`: Pseudo-heatbath sweeps per trajectory (optional, default `1`, must be `> 0`)
+- `-novr`: Overrelaxation sweeps per trajectory (optional, default `4`, may be `0`)
+- `-nsave`: Save gauge configuration every `N` trajectories (optional, default `100`, must be `> 0`)
 - `-xi0`: Bare anisotropy (optional, default `1.0`)
+
+One trajectory consists of `nhb` pseudo-heatbath sweeps followed by `novr`
+overrelaxation sweeps, then reunitarization and measurements.
 
 When `xi0 != 1`, the code uses anisotropic Wilson plaquette weights:
 - spatial-spatial plaquettes: `beta / xi0`
@@ -154,7 +162,8 @@ make -j
 MPI run format:
 
 ```bash
-# mpirun -np P ./heatbath -geom p0 ... p{NDIMS-1} -latt L0 ... L{NDIMS-1} -beta beta -ntraj ntraj [-xi0 xi0]
+# mpirun -np P ./heatbath -geom p0 ... p{NDIMS-1} -latt L0 ... L{NDIMS-1} \
+#   -beta beta -ntraj ntraj [-nhb nhb] [-novr novr] [-nsave nsave] [-xi0 xi0]
 ```
 
 Rules:
@@ -213,38 +222,6 @@ Notes:
 
 ```bash
 ./test_kwqft
-```
-
-## Code Structure
-
-```
-kokkos_src/
-├── CMakeLists.txt          # CMake build configuration
-├── include/
-│   ├── kwqft.hpp           # Main header file
-│   ├── kwqft_common.hpp    # Common definitions and Kokkos type aliases
-│   ├── complex.hpp         # Complex number class
-│   ├── msu2.hpp            # SU(2) subgroup representation
-│   ├── matrixsun.hpp       # SU(N) matrix class
-│   ├── constants.hpp       # Lattice parameters
-│   ├── index.hpp           # Lattice indexing functions
-│   ├── gauge_array.hpp     # Gauge field array container
-│   ├── random.hpp          # Random number generation
-│   ├── monte.hpp           # Monte Carlo algorithms
-│   └── measurements.hpp    # Physical measurements
-├── src/
-│   ├── constants.cpp       # Constants implementation
-│   ├── gauge_array.cpp     # Gauge field implementation
-│   ├── random.cpp          # Random number implementation
-│   ├── monte.cpp           # Monte Carlo implementation
-│   ├── plaquette.cpp       # Plaquette measurement
-│   ├── polyakov.cpp        # Polyakov loop measurement
-│   ├── reunitarize.cpp     # Reunitarization
-│   ├── io_gauge.cpp        # Configuration I/O
-├── main/
-│   └── heatbath_main.cpp   # Main program
-└── test/
-    └── test_main.cpp       # Test program
 ```
 
 ## Performance Portability Notes

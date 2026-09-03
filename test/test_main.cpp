@@ -252,6 +252,55 @@ template <typename Real> bool test_heatbath_thermalization() {
   return true;
 }
 
+template <typename Real> bool test_overrelaxation_trajectory() {
+  printf("Testing HeatBath + Overrelaxation trajectory...\n");
+
+  std::vector<int> lattice_size(NDIMS, 4);
+  reset_and_initialize_params(lattice_size, 6.0);
+  auto &params = PARAMS::params;
+
+  GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
+                         params.volume * NDIMS, true);
+  gauge.initCold();
+
+  RandomGenerator rng(24680, params.half_volume);
+  HeatBath<Real> heatbath(gauge, rng, params);
+  Overrelaxation<Real> overrelax(gauge, params);
+  Reunitarize<Real> reunitarize(gauge, params);
+  Plaquette<Real> plaq(gauge, params);
+
+  // Thermalize a bit, then one trajectory: 1 HB + 4 OR (common LQCD pattern)
+  for (int i = 0; i < 5; ++i) {
+    heatbath.run();
+  }
+  plaq.run();
+  const Real plaq_before = plaq.value();
+
+  heatbath.run();
+  for (int i = 0; i < 4; ++i) {
+    overrelax.run();
+  }
+  reunitarize.run();
+  plaq.run();
+  const Real plaq_after = plaq.value();
+
+  // Overrelaxation is microcanonical: plaquette should stay in a similar
+  // physical range (not jump back to ~1 or collapse).
+  bool ok = plaq_after > Real(0.3) && plaq_after < Real(1.0);
+  ok = ok && std::abs(plaq_after - plaq_before) < Real(0.4);
+
+  if (!ok) {
+    printf("  FAILED: plaquette before traj = %f, after = %f\n",
+           static_cast<double>(plaq_before), static_cast<double>(plaq_after));
+    return false;
+  }
+
+  printf("  Plaquette before traj = %f\n", static_cast<double>(plaq_before));
+  printf("  After 1 HB + 4 OR     = %f\n", static_cast<double>(plaq_after));
+  printf("  PASSED\n");
+  return true;
+}
+
 #ifdef KWQFT_USE_MPI
 template <typename Real> bool test_mpi_gauge_io_roundtrip() {
   const int nproc = mpi_comm_size();
@@ -541,6 +590,10 @@ int main(int argc, char *argv[]) {
     else
       failed++;
     if (test_heatbath_thermalization<double>())
+      passed++;
+    else
+      failed++;
+    if (test_overrelaxation_trajectory<double>())
       passed++;
     else
       failed++;
