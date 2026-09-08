@@ -108,11 +108,20 @@ public:
       }
     }
 
-    spatialValue_ =
-        spatialSum / (Real(NCOLORS) * norm_vol * TOTAL_NUM_SPLAQS);
-    temporalValue_ =
-        temporalSum / (Real(NCOLORS) * norm_vol * TOTAL_NUM_TPLAQS);
-    plaqValue_ = (spatialValue_ + temporalValue_) / Real(2);
+    const Real inv_nc_vol = Real(1) / (Real(NCOLORS) * Real(norm_vol));
+    // NDIMS=2: TOTAL_NUM_SPLAQS=0 (only one plaquette plane, counted as temporal).
+    if constexpr (TOTAL_NUM_SPLAQS > 0) {
+      spatialValue_ = spatialSum * inv_nc_vol / Real(TOTAL_NUM_SPLAQS);
+    } else {
+      spatialValue_ = Real(0);
+    }
+    temporalValue_ = temporalSum * inv_nc_vol / Real(TOTAL_NUM_TPLAQS);
+    if constexpr (TOTAL_NUM_SPLAQS > 0) {
+      // Equal weight of spatial/temporal averages (matches anisotropic reporting).
+      plaqValue_ = (spatialValue_ + temporalValue_) / Real(2);
+    } else {
+      plaqValue_ = temporalValue_;
+    }
 
     time_ = timer.seconds();
   }

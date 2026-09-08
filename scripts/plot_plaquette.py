@@ -61,8 +61,8 @@ def mean_sem(values):
 
 
 def fmt_mean_err(mean, sem):
-    mean_str = f"{mean:.6f}"
-    err_digits = int(round(abs(sem) * 1_000_000.0))
+    mean_str = f"{mean:.8f}"
+    err_digits = int(round(abs(sem) * 100_000_000.0))
     return f"{mean_str}({err_digits})"
 
 

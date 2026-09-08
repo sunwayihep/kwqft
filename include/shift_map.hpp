@@ -21,8 +21,15 @@
 
 namespace kwqft {
 
+/// Dense temps needed by staple construction: 5 shifts × (NDIMS−1) dirs.
+constexpr int SHIFT_BUF_STAPLE = 5 * (NDIMS > 1 ? NDIMS - 1 : 1);
+/// Dense temps for plaquette algebra:
+///   2×shift + 2×adj + 3×mul  (see Plaquette::run).
+constexpr int SHIFT_BUF_PLAQUETTE = 7;
 /// Max dense shift fields alive between \ref ShiftMap::begin_sweep calls.
-constexpr int SHIFT_BUF_COUNT = 5 * (NDIMS > 1 ? NDIMS - 1 : 1);
+constexpr int SHIFT_BUF_COUNT =
+    (SHIFT_BUF_STAPLE > SHIFT_BUF_PLAQUETTE) ? SHIFT_BUF_STAPLE
+                                             : SHIFT_BUF_PLAQUETTE;
 
 /// Tangential face volume for direction \p mu (product of grid[d], d != mu).
 KOKKOS_INLINE_FUNCTION int64_t shift_face_volume(int mu, const LatticeParams &p) {
