@@ -153,13 +153,17 @@ void ShiftMap<Real>::shift_impl(const ComplexT *src, ComplexT *dst,
     auto d_ghost_v = d_ghost_[mu];
     MPI_Comm comm = kwqft_mpi_cart_comm();
 
+    // FORWARD:  dest(x)=src(x+e_mu) → pack low face, send to -mu, recv from +mu
+    // BACKWARD: dest(x)=src(x-e_mu) → pack high face, send to +mu, recv from -mu
     const int send_face =
         (isign == FORWARD) ? 0 : par.grid[mu] - 1;
-    const int peer = (isign == FORWARD) ? mpi_cart_neighbor(mu, +1)
-                                              : mpi_cart_neighbor(mu, -1);
+    const int send_peer = (isign == FORWARD) ? mpi_cart_neighbor(mu, -1)
+                                             : mpi_cart_neighbor(mu, +1);
+    const int recv_peer = (isign == FORWARD) ? mpi_cart_neighbor(mu, +1)
+                                             : mpi_cart_neighbor(mu, -1);
     const int tag = 3000 + mu * 2 + (isign == FORWARD ? 0 : 1);
 
-    if (peer >= 0) {
+    if (send_peer >= 0 && recv_peer >= 0) {
       Kokkos::parallel_for(
           "shift_pack_face",
           Kokkos::RangePolicy<DefaultExecSpace>(0, fv),
@@ -173,8 +177,9 @@ void ShiftMap<Real>::shift_impl(const ComplexT *src, ComplexT *dst,
       Kokkos::fence();
       Kokkos::deep_copy(h_send, d_pack);
 
-      MPI_Sendrecv(h_send.data(), nbytes, MPI_BYTE, peer, tag, h_recv.data(),
-                   nbytes, MPI_BYTE, peer, tag, comm, MPI_STATUS_IGNORE);
+      MPI_Sendrecv(h_send.data(), nbytes, MPI_BYTE, send_peer, tag,
+                   h_recv.data(), nbytes, MPI_BYTE, recv_peer, tag, comm,
+                   MPI_STATUS_IGNORE);
       Kokkos::deep_copy(d_ghost_v, h_recv);
       ghost_ptr = d_ghost_v.data();
     }
