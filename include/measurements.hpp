@@ -197,12 +197,31 @@ public:
   using GaugeT = GaugeArray<Real>;
   using MatrixT = MatrixSun<Real, NCOLORS>;
   using ComplexT = Complex<Real>;
+  using PolyView = Kokkos::View<MatrixT *, DefaultMemSpace>;
+  using PolyHostView = typename PolyView::host_mirror_type;
 
 private:
   GaugeT &gauge_;
   LatticeParams params_;
   ComplexT polyValue_;
   double time_;
+  PolyView local_poly_;
+  PolyHostView host_poly_;
+  std::vector<MatrixT> recv_poly_;
+  int64_t poly_spatial_vol_{0};
+
+  void ensure_mpi_workspace(int64_t spatialVolume) {
+    if (poly_spatial_vol_ == spatialVolume &&
+        static_cast<int64_t>(local_poly_.extent(0)) == spatialVolume) {
+      return;
+    }
+    local_poly_ = PolyView(
+        Kokkos::view_alloc("PolyakovLoop_local", Kokkos::WithoutInitializing),
+        spatialVolume);
+    host_poly_ = Kokkos::create_mirror_view(local_poly_);
+    recv_poly_.assign(static_cast<size_t>(spatialVolume), MatrixT{});
+    poly_spatial_vol_ = spatialVolume;
+  }
 
 public:
   PolyakovLoop(GaugeT &gauge, const LatticeParams &params)
@@ -240,9 +259,8 @@ public:
     Real polyIm = 0;
 
     if (mpi_time_split) {
-      Kokkos::View<MatrixT *, DefaultMemSpace> local_poly(
-          Kokkos::view_alloc("PolyakovLoop_local", Kokkos::WithoutInitializing),
-          spatialVolume);
+      ensure_mpi_workspace(spatialVolume);
+      auto local_poly = local_poly_;
 
       Kokkos::parallel_for(
           "PolyakovLoop_local",
@@ -269,21 +287,18 @@ public:
           });
       Kokkos::fence();
 
-      auto host_poly = Kokkos::create_mirror_view(local_poly);
-      Kokkos::deep_copy(host_poly, local_poly);
-
-      MatrixT *poly_ptr = host_poly.data();
+      Kokkos::deep_copy(host_poly_, local_poly_);
+      MatrixT *poly_ptr = host_poly_.data();
 
 #ifdef KWQFT_USE_MPI
       const int nbytes =
           static_cast<int>(spatialVolume * static_cast<int64_t>(sizeof(MatrixT)));
       if (t_coord > 0) {
-        std::vector<MatrixT> recv_poly(static_cast<size_t>(spatialVolume));
         const int rank_down = mpi_cart_neighbor(tDir, -1);
-        MPI_Recv(recv_poly.data(), nbytes, MPI_BYTE, rank_down, 8100 + t_coord,
+        MPI_Recv(recv_poly_.data(), nbytes, MPI_BYTE, rank_down, 8100 + t_coord,
                  kwqft_mpi_cart_comm(), MPI_STATUS_IGNORE);
         for (int64_t s = 0; s < spatialVolume; ++s) {
-          poly_ptr[s] = recv_poly[static_cast<size_t>(s)] * poly_ptr[s];
+          poly_ptr[s] = recv_poly_[static_cast<size_t>(s)] * poly_ptr[s];
         }
       }
       if (t_coord < t_nproc - 1) {

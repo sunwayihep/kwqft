@@ -44,6 +44,7 @@ public:
   }
 
   /// Dense EO field produced by \c shift.
+  KOKKOS_INLINE_FUNCTION
   static LatticeColorMatrix shifted(const ComplexT *dense) {
     LatticeColorMatrix f;
     f.data_ = dense;

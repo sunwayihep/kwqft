@@ -26,7 +26,12 @@ template <typename Real> struct ShiftMapHolder {
 
 template <typename Real> ShiftMap<Real> &shiftMap() {
   if (!ShiftMapHolder<Real>::instance) {
-    KWQFT_ERROR("ShiftMap not initialized (call initializeParams first)");
+    if (!PARAMS::initialized) {
+      KWQFT_ERROR("ShiftMap not initialized (call initializeParams first)");
+    }
+    // Lazy construct (e.g. float map only if a float field path runs).
+    ShiftMapHolder<Real>::instance =
+        std::make_unique<ShiftMap<Real>>(PARAMS::params);
   }
   return *ShiftMapHolder<Real>::instance;
 }

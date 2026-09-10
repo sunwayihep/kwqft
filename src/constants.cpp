@@ -48,7 +48,6 @@ void initializeParams(const std::vector<int> &lattice_size, double beta,
   PARAMS::initialized = true;
 
   initializeShiftMap<double>(PARAMS::params);
-  initializeShiftMap<float>(PARAMS::params);
 
   // Initialize device params view (lazy)
   auto &device_params = get_device_params();
@@ -134,7 +133,6 @@ void initializeParamsDistributed(const std::vector<int> &global_lattice,
   PARAMS::initialized = true;
 
   initializeShiftMap<double>(PARAMS::params);
-  initializeShiftMap<float>(PARAMS::params);
 
   auto &device_params = get_device_params();
   auto &host_mirror = get_host_params_mirror();
