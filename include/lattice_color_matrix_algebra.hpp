@@ -55,6 +55,21 @@ KOKKOS_INLINE_FUNCTION void storeLatticeColorMatrix(
   }
 }
 
+/// Read one matrix element without materializing a full MatrixSun (HIP VGPR).
+template <typename Real>
+KOKKOS_INLINE_FUNCTION Complex<Real> loadLcmElement(
+    const Complex<Real> *data, int64_t idx_eo, int i, int j, bool is_gauge_soa,
+    int link_dir, int64_t soa_stride, const LatticeParams &p) {
+  if (is_gauge_soa) {
+    const int64_t base =
+        idx_eo + static_cast<int64_t>(link_dir) * p.volume;
+    return data[base + (j + i * NCOLORS) * soa_stride];
+  }
+  const int64_t base =
+      idx_eo * static_cast<int64_t>(LatticeColorMatrix<Real>::site_elems);
+  return data[base + j + i * NCOLORS];
+}
+
 template <typename Real>
 LatticeColorMatrix<Real> allocate_dense_lcm() {
   auto &map = shiftMap<Real>();
@@ -67,6 +82,11 @@ LatticeColorMatrix<Real> allocate_dense_lcm() {
 //=============================================================================
 
 /// Hermitian conjugate: \c out(x) = adj(in(x)).
+///
+/// Element-wise (no full-matrix temporaries): HIP/DCU otherwise hits
+/// HSA_STATUS_ERROR_OUT_OF_REGISTERS for mid-size Nc (notably Nc=6), because
+/// MatrixSun + dagger() return can exceed the per-lane VGPR limit while the
+/// compiler still chooses private_segment_size=0.
 template <typename Real>
 LatticeColorMatrix<Real> adj(const LatticeColorMatrix<Real> &in,
                              const char *label = "lcm_adj") {
@@ -83,19 +103,16 @@ LatticeColorMatrix<Real> adj(const LatticeColorMatrix<Real> &in,
       label, Kokkos::RangePolicy<DefaultExecSpace>(0, vol),
       KOKKOS_LAMBDA(const int64_t idx_eo) {
         const LatticeParams p = dparams();
-        MatrixSun<Real, NCOLORS> U;
-        if (is_gauge_soa) {
-          loadGaugeLinkSoa(in_data, idx_eo, link_dir, soa_stride, p, U);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              U.e[i][j] = in_data[base + j + i * NCOLORS];
-            }
+        const int64_t out_base =
+            idx_eo * static_cast<int64_t>(LatticeColorMatrix<Real>::site_elems);
+        // out[i][j] = conj(in[j][i])
+        for (int i = 0; i < NCOLORS; ++i) {
+          for (int j = 0; j < NCOLORS; ++j) {
+            const Complex<Real> c = loadLcmElement(
+                in_data, idx_eo, j, i, is_gauge_soa, link_dir, soa_stride, p);
+            out_data[out_base + j + i * NCOLORS] = ~c;
           }
         }
-        storeLatticeColorMatrix(U.dagger(), idx_eo, out_data);
       });
   Kokkos::fence();
   return out;
@@ -123,30 +140,21 @@ multiply(const LatticeColorMatrix<Real> &a, const LatticeColorMatrix<Real> &b,
       label, Kokkos::RangePolicy<DefaultExecSpace>(0, vol),
       KOKKOS_LAMBDA(const int64_t idx_eo) {
         const LatticeParams p = dparams();
-        MatrixSun<Real, NCOLORS> Ua, Ub;
-        if (a_soa) {
-          loadGaugeLinkSoa(a_data, idx_eo, a_dir, a_stride, p, Ua);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              Ua.e[i][j] = a_data[base + j + i * NCOLORS];
+        const int64_t out_base =
+            idx_eo * static_cast<int64_t>(LatticeColorMatrix<Real>::site_elems);
+        for (int i = 0; i < NCOLORS; ++i) {
+          for (int j = 0; j < NCOLORS; ++j) {
+            Complex<Real> sum = Complex<Real>::zero();
+            for (int k = 0; k < NCOLORS; ++k) {
+              const Complex<Real> aik = loadLcmElement(
+                  a_data, idx_eo, i, k, a_soa, a_dir, a_stride, p);
+              const Complex<Real> bkj = loadLcmElement(
+                  b_data, idx_eo, k, j, b_soa, b_dir, b_stride, p);
+              sum += aik * bkj;
             }
+            out_data[out_base + j + i * NCOLORS] = sum;
           }
         }
-        if (b_soa) {
-          loadGaugeLinkSoa(b_data, idx_eo, b_dir, b_stride, p, Ub);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              Ub.e[i][j] = b_data[base + j + i * NCOLORS];
-            }
-          }
-        }
-        storeLatticeColorMatrix(Ua * Ub, idx_eo, out_data);
       });
   Kokkos::fence();
   return out;
@@ -174,30 +182,17 @@ add(const LatticeColorMatrix<Real> &a, const LatticeColorMatrix<Real> &b,
       label, Kokkos::RangePolicy<DefaultExecSpace>(0, vol),
       KOKKOS_LAMBDA(const int64_t idx_eo) {
         const LatticeParams p = dparams();
-        MatrixSun<Real, NCOLORS> Ua, Ub;
-        if (a_soa) {
-          loadGaugeLinkSoa(a_data, idx_eo, a_dir, a_stride, p, Ua);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              Ua.e[i][j] = a_data[base + j + i * NCOLORS];
-            }
+        const int64_t out_base =
+            idx_eo * static_cast<int64_t>(LatticeColorMatrix<Real>::site_elems);
+        for (int i = 0; i < NCOLORS; ++i) {
+          for (int j = 0; j < NCOLORS; ++j) {
+            const Complex<Real> aa = loadLcmElement(
+                a_data, idx_eo, i, j, a_soa, a_dir, a_stride, p);
+            const Complex<Real> bb = loadLcmElement(
+                b_data, idx_eo, i, j, b_soa, b_dir, b_stride, p);
+            out_data[out_base + j + i * NCOLORS] = aa + bb;
           }
         }
-        if (b_soa) {
-          loadGaugeLinkSoa(b_data, idx_eo, b_dir, b_stride, p, Ub);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              Ub.e[i][j] = b_data[base + j + i * NCOLORS];
-            }
-          }
-        }
-        storeLatticeColorMatrix(Ua + Ub, idx_eo, out_data);
       });
   Kokkos::fence();
   return out;
@@ -220,19 +215,15 @@ LatticeColorMatrix<Real> scale(const LatticeColorMatrix<Real> &in, Real coeff,
       label, Kokkos::RangePolicy<DefaultExecSpace>(0, vol),
       KOKKOS_LAMBDA(const int64_t idx_eo) {
         const LatticeParams p = dparams();
-        MatrixSun<Real, NCOLORS> U;
-        if (is_gauge_soa) {
-          loadGaugeLinkSoa(in_data, idx_eo, link_dir, soa_stride, p, U);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              U.e[i][j] = in_data[base + j + i * NCOLORS];
-            }
+        const int64_t out_base =
+            idx_eo * static_cast<int64_t>(LatticeColorMatrix<Real>::site_elems);
+        for (int i = 0; i < NCOLORS; ++i) {
+          for (int j = 0; j < NCOLORS; ++j) {
+            const Complex<Real> c = loadLcmElement(
+                in_data, idx_eo, i, j, is_gauge_soa, link_dir, soa_stride, p);
+            out_data[out_base + j + i * NCOLORS] = c * coeff;
           }
         }
-        storeLatticeColorMatrix(U * coeff, idx_eo, out_data);
       });
   Kokkos::fence();
   return out;
@@ -280,19 +271,13 @@ Real realTraceSum(const LatticeColorMatrix<Real> &field,
       label, Kokkos::RangePolicy<DefaultExecSpace>(0, vol),
       KOKKOS_LAMBDA(const int64_t idx_eo, Real &s) {
         const LatticeParams p = dparams();
-        MatrixSun<Real, NCOLORS> U;
-        if (is_gauge_soa) {
-          loadGaugeLinkSoa(field_data, idx_eo, link_dir, soa_stride, p, U);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              U.e[i][j] = field_data[base + j + i * NCOLORS];
-            }
-          }
+        Real tr = Real(0);
+        for (int i = 0; i < NCOLORS; ++i) {
+          tr += loadLcmElement(field_data, idx_eo, i, i, is_gauge_soa,
+                               link_dir, soa_stride, p)
+                    .real();
         }
-        s += U.realtrace();
+        s += tr;
       },
       sum);
   return sum;
