@@ -77,7 +77,7 @@ void shift_field_forward_eo(const SrcView &src, const DstView &dst, int mu,
   const int64_t se = static_cast<int64_t>(site_elems);
   Kokkos::parallel_for(
       "shift_field_forward_eo",
-      Kokkos::RangePolicy<DefaultExecSpace>(0, vol), KOKKOS_LAMBDA(int64_t idx_eo) {
+      range_policy(0, vol), KOKKOS_LAMBDA(int64_t idx_eo) {
         const int64_t src_idx = shift_eo(idx_eo, mu, FORWARD, p);
         for (int64_t k = 0; k < se; ++k) {
           dst(idx_eo * se + k) = src(src_idx * se + k);
@@ -96,7 +96,7 @@ void shift_field_backward_eo(const SrcView &src, const DstView &dst, int mu,
   const int64_t se = static_cast<int64_t>(site_elems);
   Kokkos::parallel_for(
       "shift_field_backward_eo",
-      Kokkos::RangePolicy<DefaultExecSpace>(0, vol), KOKKOS_LAMBDA(int64_t idx_eo) {
+      range_policy(0, vol), KOKKOS_LAMBDA(int64_t idx_eo) {
         const int64_t src_idx = shift_eo(idx_eo, mu, BACKWARD, p);
         for (int64_t k = 0; k < se; ++k) {
           dst(idx_eo * se + k) = src(src_idx * se + k);

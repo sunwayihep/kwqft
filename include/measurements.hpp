@@ -264,7 +264,7 @@ public:
 
       Kokkos::parallel_for(
           "PolyakovLoop_local",
-          Kokkos::RangePolicy<DefaultExecSpace>(0, spatialVolume),
+          range_policy(0, spatialVolume),
           KOKKOS_LAMBDA(const int64_t spatialIdx) {
             ComplexT *gaugePtr = gaugeView.data();
 
@@ -318,7 +318,7 @@ public:
     } else {
       Kokkos::parallel_reduce(
           "PolyakovLoop",
-          Kokkos::RangePolicy<DefaultExecSpace>(0, spatialVolume),
+          range_policy(0, spatialVolume),
           KOKKOS_LAMBDA(const int64_t spatialIdx, Real &reSum, Real &imSum) {
             ComplexT *gaugePtr = gaugeView.data();
 
@@ -457,91 +457,68 @@ private:
   double time_;
 
   /**
-   * @brief Gram-Schmidt reunitarization for a single in-register matrix (SU(3)).
+   * @brief Gram-Schmidt reunitarization for a single matrix
    */
   KOKKOS_INLINE_FUNCTION
   static void reunitarizeMatrix(MatrixT &U) {
-    // For SU(3), use the simplified method
-    // Normalize first row
-    Real norm = Real(0);
-    for (int j = 0; j < 3; ++j) {
-      norm += U.e[0][j].abs2();
-    }
-    norm = Real(1) / Kokkos::sqrt(norm);
-    for (int j = 0; j < 3; ++j) {
-      U.e[0][j] *= norm;
-    }
-
-    // Orthogonalize second row to first
-    ComplexT dot = ComplexT::zero();
-    for (int j = 0; j < 3; ++j) {
-      dot += ~U.e[0][j] * U.e[1][j];
-    }
-    for (int j = 0; j < 3; ++j) {
-      U.e[1][j] -= dot * U.e[0][j];
-    }
-
-    // Normalize second row
-    norm = Real(0);
-    for (int j = 0; j < 3; ++j) {
-      norm += U.e[1][j].abs2();
-    }
-    norm = Real(1) / Kokkos::sqrt(norm);
-    for (int j = 0; j < 3; ++j) {
-      U.e[1][j] *= norm;
-    }
-
-    // Third row is cross product of first two
-    U.e[2][0] = ~(U.e[0][1] * U.e[1][2] - U.e[0][2] * U.e[1][1]);
-    U.e[2][1] = ~(U.e[0][2] * U.e[1][0] - U.e[0][0] * U.e[1][2]);
-    U.e[2][2] = ~(U.e[0][0] * U.e[1][1] - U.e[0][1] * U.e[1][0]);
-  }
-
-  /// SOA element access: linkIdx + (j + i*Nc) * size
-  KOKKOS_INLINE_FUNCTION
-  static ComplexT loadSoa(const ComplexT *gaugePtr, int64_t linkIdx,
-                          int64_t size, int i, int j) {
-    return gaugePtr[linkIdx + (j + i * NCOLORS) * size];
-  }
-
-  KOKKOS_INLINE_FUNCTION
-  static void storeSoa(ComplexT *gaugePtr, int64_t linkIdx, int64_t size, int i,
-                       int j, const ComplexT &v) {
-    gaugePtr[linkIdx + (j + i * NCOLORS) * size] = v;
-  }
-
-  /**
-   * @brief General Gram-Schmidt in SOA global memory (no full MatrixSun).
-   *
-   * Avoids HIP/DCU HSA_STATUS_ERROR_OUT_OF_REGISTERS for mid-size Nc
-   * (notably Nc=6), where a register-resident MatrixSun + unrolled GS
-   * exceeds the per-lane VGPR limit with private_segment_size=0.
-   */
-  KOKKOS_INLINE_FUNCTION
-  static void reunitarizeMatrixSoa(ComplexT *gaugePtr, int64_t linkIdx,
-                                   int64_t size) {
-    for (int row = 0; row < NCOLORS; ++row) {
-      for (int prev = 0; prev < row; ++prev) {
-        ComplexT dot = ComplexT::zero();
-        for (int j = 0; j < NCOLORS; ++j) {
-          dot += ~loadSoa(gaugePtr, linkIdx, size, prev, j) *
-                 loadSoa(gaugePtr, linkIdx, size, row, j);
-        }
-        for (int j = 0; j < NCOLORS; ++j) {
-          storeSoa(gaugePtr, linkIdx, size, row, j,
-                   loadSoa(gaugePtr, linkIdx, size, row, j) -
-                       dot * loadSoa(gaugePtr, linkIdx, size, prev, j));
-        }
-      }
-
+    if constexpr (NCOLORS == 3) {
+      // For SU(3), use the simplified method
+      // Normalize first row
       Real norm = Real(0);
-      for (int j = 0; j < NCOLORS; ++j) {
-        norm += loadSoa(gaugePtr, linkIdx, size, row, j).abs2();
+      for (int j = 0; j < 3; ++j) {
+        norm += U.e[0][j].abs2();
       }
       norm = Real(1) / Kokkos::sqrt(norm);
-      for (int j = 0; j < NCOLORS; ++j) {
-        storeSoa(gaugePtr, linkIdx, size, row, j,
-                 loadSoa(gaugePtr, linkIdx, size, row, j) * norm);
+      for (int j = 0; j < 3; ++j) {
+        U.e[0][j] *= norm;
+      }
+
+      // Orthogonalize second row to first
+      ComplexT dot = ComplexT::zero();
+      for (int j = 0; j < 3; ++j) {
+        dot += ~U.e[0][j] * U.e[1][j];
+      }
+      for (int j = 0; j < 3; ++j) {
+        U.e[1][j] -= dot * U.e[0][j];
+      }
+
+      // Normalize second row
+      norm = Real(0);
+      for (int j = 0; j < 3; ++j) {
+        norm += U.e[1][j].abs2();
+      }
+      norm = Real(1) / Kokkos::sqrt(norm);
+      for (int j = 0; j < 3; ++j) {
+        U.e[1][j] *= norm;
+      }
+
+      // Third row is cross product of first two
+      U.e[2][0] = ~(U.e[0][1] * U.e[1][2] - U.e[0][2] * U.e[1][1]);
+      U.e[2][1] = ~(U.e[0][2] * U.e[1][0] - U.e[0][0] * U.e[1][2]);
+      U.e[2][2] = ~(U.e[0][0] * U.e[1][1] - U.e[0][1] * U.e[1][0]);
+    } else {
+      // General Gram-Schmidt for SU(N)
+      for (int row = 0; row < NCOLORS; ++row) {
+        // Orthogonalize against previous rows
+        for (int prev = 0; prev < row; ++prev) {
+          ComplexT dot = ComplexT::zero();
+          for (int j = 0; j < NCOLORS; ++j) {
+            dot += ~U.e[prev][j] * U.e[row][j];
+          }
+          for (int j = 0; j < NCOLORS; ++j) {
+            U.e[row][j] -= dot * U.e[prev][j];
+          }
+        }
+
+        // Normalize
+        Real norm = Real(0);
+        for (int j = 0; j < NCOLORS; ++j) {
+          norm += U.e[row][j].abs2();
+        }
+        norm = Real(1) / Kokkos::sqrt(norm);
+        for (int j = 0; j < NCOLORS; ++j) {
+          U.e[row][j] *= norm;
+        }
       }
     }
   }
@@ -561,26 +538,28 @@ public:
     int64_t totalLinks = params_.size; // volume * NDIMS
 
     Kokkos::parallel_for(
-        "Reunitarize", Kokkos::RangePolicy<DefaultExecSpace>(0, totalLinks),
+        "Reunitarize", range_policy(0, totalLinks),
         KOKKOS_LAMBDA(const int64_t linkIdx) {
           ComplexT *gaugePtr = gaugeView.data();
 
-#if (NCOLORS == 3)
+          // Load matrix from SOA format
+          // Index: linkIdx + elemIdx * size
           MatrixT U;
           for (int i = 0; i < NCOLORS; ++i) {
             for (int j = 0; j < NCOLORS; ++j) {
-              U.e[i][j] = loadSoa(gaugePtr, linkIdx, size, i, j);
+              U.e[i][j] = gaugePtr[linkIdx + (j + i * NCOLORS) * size];
             }
           }
+
+          // Reunitarize
           reunitarizeMatrix(U);
+
+          // Store back
           for (int i = 0; i < NCOLORS; ++i) {
             for (int j = 0; j < NCOLORS; ++j) {
-              storeSoa(gaugePtr, linkIdx, size, i, j, U.e[i][j]);
+              gaugePtr[linkIdx + (j + i * NCOLORS) * size] = U.e[i][j];
             }
           }
-#else
-          reunitarizeMatrixSoa(gaugePtr, linkIdx, size);
-#endif
         });
     Kokkos::fence();
 

@@ -171,7 +171,7 @@ void ShiftMap<Real>::shift_impl(const ComplexT *src, ComplexT *dst,
     if (send_peer >= 0 && recv_peer >= 0) {
       Kokkos::parallel_for(
           "shift_pack_face",
-          Kokkos::RangePolicy<DefaultExecSpace>(0, fv),
+          range_policy(0, fv),
           KOKKOS_LAMBDA(const int64_t fidx) {
             int x[NDIMS];
             face_coords(fidx, mu, send_face, x, par);
@@ -193,7 +193,7 @@ void ShiftMap<Real>::shift_impl(const ComplexT *src, ComplexT *dst,
 
   Kokkos::parallel_for(
       "shift_field",
-      Kokkos::RangePolicy<DefaultExecSpace>(0, vol),
+      range_policy(0, vol),
       KOKKOS_LAMBDA(const int64_t idx_eo) {
         int x[NDIMS];
         const int oddbit = (idx_eo >= par.half_volume) ? 1 : 0;

@@ -27,6 +27,22 @@ option(KWQFT_USE_MPI "MPI parallel build (link MPI if ON)" OFF)
 set(KWQFT_NCOLORS "3" CACHE STRING "Number of colors for SU(N)")
 set(KWQFT_NDIMS "4" CACHE STRING "Number of spacetime dimensions")
 
+# Kokkos::LaunchBounds<MaxThreads, MinBlocks> for device kernels; 0 = backend
+# default. The HIP backend launches 1024-thread blocks regardless of register
+# usage, so register-heavy SU(N) kernels need a cap there (256). CUDA already
+# sizes blocks from the occupancy calculator; adding __launch_bounds__ there
+# changes ptxas register allocation (speed and RNG-state mapping), so leave 0.
+# No effect on host backends. See include/kwqft_common.hpp.
+if(KWQFT_ENABLE_HIP)
+  set(KWQFT_MAX_THREADS_PER_BLOCK_DEFAULT "256")
+else()
+  set(KWQFT_MAX_THREADS_PER_BLOCK_DEFAULT "0")
+endif()
+set(KWQFT_MAX_THREADS_PER_BLOCK "${KWQFT_MAX_THREADS_PER_BLOCK_DEFAULT}" CACHE STRING
+    "Max threads per block for GPU kernels (Kokkos::LaunchBounds); 0 = backend default")
+set(KWQFT_MIN_BLOCKS_PER_SM "0" CACHE STRING
+    "Min blocks per SM/CU for GPU kernels (Kokkos::LaunchBounds); 0 = backend default")
+
 # Local Kokkos source directory (use this if you cannot access GitHub)
 set(KOKKOS_SOURCE_DIR "" CACHE PATH "Path to local Kokkos source directory")
 set(KOKKOS_KERNELS_SOURCE_DIR "" CACHE PATH "Path to local KokkosKernels source directory (optional)")
@@ -116,6 +132,8 @@ endif()
 # Add compile definitions
 add_compile_definitions(NCOLORS=${KWQFT_NCOLORS})
 add_compile_definitions(NDIMS=${KWQFT_NDIMS})
+add_compile_definitions(KWQFT_MAX_THREADS_PER_BLOCK=${KWQFT_MAX_THREADS_PER_BLOCK})
+add_compile_definitions(KWQFT_MIN_BLOCKS_PER_SM=${KWQFT_MIN_BLOCKS_PER_SM})
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -172,6 +190,7 @@ message(STATUS "===========================================")
 message(STATUS "KWQFT Configuration:")
 message(STATUS "  NCOLORS: ${KWQFT_NCOLORS}")
 message(STATUS "  NDIMS: ${KWQFT_NDIMS}")
+message(STATUS "  LaunchBounds: MAX_THREADS_PER_BLOCK=${KWQFT_MAX_THREADS_PER_BLOCK} MIN_BLOCKS_PER_SM=${KWQFT_MIN_BLOCKS_PER_SM} (0 = backend default)")
 message(STATUS "  OpenMP: ${KWQFT_ENABLE_OPENMP}")
 message(STATUS "  CUDA: ${KWQFT_ENABLE_CUDA}")
 message(STATUS "  HIP: ${KWQFT_ENABLE_HIP}")

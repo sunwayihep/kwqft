@@ -239,7 +239,7 @@ public:
         const StapleShifts<Real> staple_sh = make_staple_shifts(u, mu);
 
         Kokkos::parallel_for(
-            "HeatBath", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
+            "HeatBath", range_policy(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
               auto gen = pool.get_state();
 
@@ -391,7 +391,7 @@ public:
         const StapleShifts<Real> staple_sh = make_staple_shifts(u, mu);
 
         Kokkos::parallel_for(
-            "Overrelaxation", Kokkos::RangePolicy<DefaultExecSpace>(0, halfVol),
+            "Overrelaxation", range_policy(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
               ComplexT *gaugePtr = gaugeView.data();
 

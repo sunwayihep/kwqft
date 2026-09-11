@@ -67,18 +67,49 @@ using HostMemSpace = typename HostExecSpace::memory_space;
 // Scratch memory space for team-level scratch
 using ScratchMemSpace = typename DefaultExecSpace::scratch_memory_space;
 
-// Range policy for parallel loops
-using range_policy = Kokkos::RangePolicy<DefaultExecSpace>;
+// Launch bounds for device kernels (ignored on host backends).
+//
+// KWQFT_MAX_THREADS_PER_BLOCK / KWQFT_MIN_BLOCKS_PER_SM map onto
+// Kokkos::LaunchBounds<MaxThreads, MinBlocks>. A value of 0 means "backend
+// default", i.e. the kernel is compiled exactly as with a bare RangePolicy.
+//
+// Why this exists: the Kokkos HIP backend launches RangePolicy kernels with
+// 1024-thread blocks (it does not consult register usage), which shrinks the
+// per-lane VGPR budget to a quarter of the hardware maximum. SU(N) kernels
+// keep several NxN complex matrices live per thread and can exceed that
+// budget (e.g. Nc=6 on HIP fails with HSA_STATUS_ERROR_OUT_OF_REGISTERS).
+// Setting KWQFT_MAX_THREADS_PER_BLOCK=256 caps the block size portably
+// (HIP -> amdgpu_flat_work_group_size, CUDA -> __launch_bounds__).
+//
+// Caveat on CUDA: the CUDA backend already picks the block size from the
+// occupancy calculator, so it does not need the cap. Adding
+// __launch_bounds__(N) there changes ptxas' register/occupancy heuristics
+// (it is allowed to use up to 64K/N registers per thread and will do so),
+// which changes kernel speed and, because the Kokkos random pool maps
+// generator states to threads by launch geometry, also the Monte Carlo
+// trajectory. Leave both values at 0 on CUDA unless you are tuning.
+#ifndef KWQFT_MAX_THREADS_PER_BLOCK
+#define KWQFT_MAX_THREADS_PER_BLOCK 0
+#endif
+#ifndef KWQFT_MIN_BLOCKS_PER_SM
+#define KWQFT_MIN_BLOCKS_PER_SM 0
+#endif
+
+using launch_bounds =
+    Kokkos::LaunchBounds<KWQFT_MAX_THREADS_PER_BLOCK, KWQFT_MIN_BLOCKS_PER_SM>;
+
+// Range policy for parallel loops (use this instead of a bare RangePolicy)
+using range_policy = Kokkos::RangePolicy<DefaultExecSpace, launch_bounds>;
 using host_range_policy = Kokkos::RangePolicy<HostExecSpace>;
 
 // Team policy for hierarchical parallelism
-using team_policy = Kokkos::TeamPolicy<DefaultExecSpace>;
+using team_policy = Kokkos::TeamPolicy<DefaultExecSpace, launch_bounds>;
 using team_member = typename team_policy::member_type;
 
 // MDRange policy for multi-dimensional parallel loops
 template <int Rank>
 using md_range_policy =
-    Kokkos::MDRangePolicy<DefaultExecSpace, Kokkos::Rank<Rank>>;
+    Kokkos::MDRangePolicy<DefaultExecSpace, Kokkos::Rank<Rank>, launch_bounds>;
 
 //=============================================================================
 // View type aliases
