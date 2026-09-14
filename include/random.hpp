@@ -44,14 +44,19 @@ public:
 
   /**
    * @brief Initialize the random number pool
+   *
+   * Requires size > 0 (normally half_volume): creates that many generator
+   * states so HeatBath can use pool.get_state(id). Site index -> RNG stream
+   * is then the identity map on every backend, independent of block size /
+   * thread count.
    */
-  void init(unsigned int seed, int size = 0) {
-    m_seed = seed;
-    if (size > 0)
-      size_ = size;
+  void init(unsigned int seed, int size) {
+    if (size <= 0)
+      KWQFT_ERROR("RandomGenerator::init requires size > 0 (half_volume)");
 
-    // Initialize the random pool with the given seed
-    pool_ = PoolType(seed);
+    m_seed = seed;
+    size_ = size;
+    pool_ = PoolType(DefaultExecSpace(), seed, static_cast<uint64_t>(size_));
     m_initialized = true;
   }
 

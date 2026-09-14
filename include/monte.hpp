@@ -241,7 +241,9 @@ public:
         Kokkos::parallel_for(
             "HeatBath", range_policy(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
-              auto gen = pool.get_state();
+              // Indexed get_state: one stream per site, no atomics; mapping is
+              // identical across CUDA/HIP/OpenMP (requires num_states >= halfVol).
+              auto gen = pool.get_state(static_cast<uint64_t>(id));
 
               ComplexT *gaugePtr = gaugeView.data();
 
@@ -272,7 +274,7 @@ public:
                 }
               }
 
-              // Return generator state to pool
+              // Write updated generator state back (no lock was taken)
               pool.free_state(gen);
             });
         Kokkos::fence();
