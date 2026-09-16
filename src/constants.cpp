@@ -95,6 +95,18 @@ void initializeParamsDistributed(const std::vector<int> &global_lattice,
       KWQFT_ERROR("global lattice dimension not divisible by process grid");
     }
     p.grid[i] = global_lattice[i] / proc_grid[i];
+    // MPI checkerboard: local parity must match global parity on every rank.
+    // When proc_grid[i]>1, coord[i]*grid[i] must be even for all coords ⇒
+    // local grid[i] must be even.
+    if (proc_grid[i] > 1 && (p.grid[i] % 2) != 0) {
+      char msg[256];
+      std::snprintf(
+          msg, sizeof(msg),
+          "Local grid[%d]=%d must be even when proc_grid[%d]=%d "
+          "(MPI even/odd checkerboard)",
+          i, p.grid[i], i, proc_grid[i]);
+      KWQFT_ERROR(msg);
+    }
     p.grid_with_ghost[i] = p.grid[i];
     p.border[i] = 0;
     p.volume *= static_cast<int64_t>(p.grid[i]);
