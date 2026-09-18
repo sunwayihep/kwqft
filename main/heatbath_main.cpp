@@ -264,16 +264,18 @@ void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
     Timer traj_timer;
     traj_timer.start();
 
-    // One trajectory: nhb heatbath sweeps + novr overrelaxation sweeps
+    // One trajectory: nhb heatbath + novr overrelax (match CUDA traj timer:
+    // reunitarize is outside the measured interval).
     for (int i = 0; i < nhb; ++i) {
       heatbath.run();
     }
     for (int i = 0; i < novr; ++i) {
       overrelax.run();
     }
-    reunitarize.run();
 
     traj_timer.stop();
+
+    reunitarize.run();
 
     plaquette.run();
     polyakov.run();

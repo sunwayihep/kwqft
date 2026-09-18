@@ -22,6 +22,9 @@ option(KWQFT_ENABLE_CUDA "Enable CUDA backend" OFF)
 option(KWQFT_ENABLE_HIP "Enable HIP backend" OFF)
 option(KWQFT_ENABLE_SYCL "Enable SYCL backend" OFF)
 option(KWQFT_USE_MPI "MPI parallel build (link MPI if ON)" OFF)
+option(KWQFT_MPI_DEVICE_AWARE
+  "Pass Kokkos DefaultMemSpace pointers to MPI (needs device-aware MPI on GPU/accelerator builds; no-op benefit on host)"
+  OFF)
 
 # Lattice parameters (can be overridden at compile time)
 set(KWQFT_NCOLORS "3" CACHE STRING "Number of colors for SU(N)")
@@ -149,7 +152,7 @@ set(KWQFT_SOURCES
     src/reunitarize.cpp
     src/io_gauge.cpp
     src/mpi_layout.cpp
-    src/shift_map.cpp
+    src/gauge_halo.cpp
 )
 
 # Create library
@@ -160,6 +163,9 @@ if(KWQFT_USE_MPI)
     find_package(MPI REQUIRED COMPONENTS CXX)
     target_link_libraries(kwqft PUBLIC MPI::MPI_CXX)
     target_compile_definitions(kwqft PUBLIC KWQFT_USE_MPI=1)
+    if(KWQFT_MPI_DEVICE_AWARE)
+        target_compile_definitions(kwqft PUBLIC KWQFT_MPI_DEVICE_AWARE=1)
+    endif()
 endif()
 
 # Link KokkosKernels if available
@@ -196,6 +202,7 @@ message(STATUS "  CUDA: ${KWQFT_ENABLE_CUDA}")
 message(STATUS "  HIP: ${KWQFT_ENABLE_HIP}")
 message(STATUS "  SYCL: ${KWQFT_ENABLE_SYCL}")
 message(STATUS "  MPI: ${KWQFT_USE_MPI}")
+message(STATUS "  MPI device-aware buffers: ${KWQFT_MPI_DEVICE_AWARE}")
 if(KOKKOS_SOURCE_DIR)
     message(STATUS "  Kokkos source: ${KOKKOS_SOURCE_DIR}")
 endif()

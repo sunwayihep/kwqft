@@ -1,59 +1,41 @@
 /**
  * @file gauge_ops.hpp
- * @brief QDPXX-style gauge observables via shift()
+ * @brief QDPXX-style gauge observables via lazy shift()
  *
- * @code
- *   LatticeGaugeLinks<Real> u(gauge_ptr, gauge_stride);
- *   tmp_0 = shift(u[nu], FORWARD, mu) * adj(shift(u[mu], FORWARD, nu));
- *   Tr( u[mu](x) * tmp_0(x) * adj(u[nu](x)) )
- * @endcode
+ * Staples use \c shift() metadata only (no volume copies). Interior sites load
+ * via EO indices; MPI ranks exchange face/edge halo before evaluation so
+ * boundary shifts read ghost buffers.
  */
 
 #ifndef KWQFT_GAUGE_OPS_HPP
 #define KWQFT_GAUGE_OPS_HPP
 
 #include "lattice_color_matrix_algebra.hpp"
-#include "shift_map.hpp"
 #include "matrixsun.hpp"
+#include "neighbor_access.hpp"
 #include "shift.hpp"
+#include "shift_field.hpp"
 
 namespace kwqft {
 
 constexpr int t_dir() { return NDIMS - 1; }
 
-template <typename Real> struct StapleShifts {
-  LatticeGaugeLinks<Real> u{};
-  LatticeColorMatrix<Real> U_nu_fwd_mu[NDIMS]{};
-  LatticeColorMatrix<Real> U_mu_fwd_nu[NDIMS]{};
-  LatticeColorMatrix<Real> U_mu_bwd_nu[NDIMS]{};
-  LatticeColorMatrix<Real> U_nu_bwd_nu[NDIMS]{};
-  LatticeColorMatrix<Real> U_nu_fwd_mu_bwd_nu[NDIMS]{};
-};
-
-template <typename Real>
-StapleShifts<Real> make_staple_shifts(const LatticeGaugeLinks<Real> &u, int mu) {
-  beginShiftSweep<Real>();
-  StapleShifts<Real> sh;
-  sh.u = u;
-  for (int nu = 0; nu < NDIMS; ++nu) {
-    if (nu == mu) {
-      continue;
-    }
-    sh.U_nu_fwd_mu[nu] = shift(u[nu], FORWARD, mu);
-    sh.U_mu_fwd_nu[nu] = shift(u[mu], FORWARD, nu);
-    sh.U_mu_bwd_nu[nu] = shift(u[mu], BACKWARD, nu);
-    sh.U_nu_bwd_nu[nu] = shift(u[nu], BACKWARD, nu);
-    sh.U_nu_fwd_mu_bwd_nu[nu] = shift(sh.U_nu_fwd_mu[nu], BACKWARD, nu);
-  }
-  return sh;
-}
-
+/**
+ * @brief Wilson staple at one EO site via lazy \c shift() views.
+ *
+ * Builds only small per-nu shift metadata on the stack (safe on device).
+ * Do not construct a full \c StapleShifts inside a GPU kernel — that can
+ * exceed per-thread stack and silently skip the launch.
+ */
 template <typename Real>
 KOKKOS_INLINE_FUNCTION MatrixSun<Real, NCOLORS>
-staple_site(const StapleShifts<Real> &sh, int64_t id, int oddbit, int mu,
-            const LatticeParams &params) {
+calculateStapleLazy(const Complex<Real> *gaugePtr, int64_t soa_stride,
+                    const GaugeHaloDevice<Real> *halo, int64_t id, int oddbit,
+                    int mu, const LatticeParams &params) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
-  const int64_t idx_eo = id + static_cast<int64_t>(oddbit) * params.half_volume;
+  const LatticeGaugeLinks<Real> u(gaugePtr, soa_stride);
+  const int64_t idx_eo =
+      id + static_cast<int64_t>(oddbit) * params.half_volume;
 
   MatrixT staple = MatrixT::zero();
   MatrixT u_nu_x, u_mu_xpnu, u_nu_xpmu, tmp;
@@ -64,15 +46,22 @@ staple_site(const StapleShifts<Real> &sh, int64_t id, int oddbit, int mu,
     }
     const Real coeff = static_cast<Real>(params.coeffs[mu][nu]);
 
-    loadGaugeLinkSoa(sh.u.data(), idx_eo, nu, sh.u.stride(), params, u_nu_x);
-    loadLatticeColorMatrix(sh.U_mu_fwd_nu[nu], idx_eo, params, u_mu_xpnu);
-    loadLatticeColorMatrix(sh.U_nu_fwd_mu[nu], idx_eo, params, u_nu_xpmu);
+    const LatticeColorMatrix<Real> U_mu_fwd_nu = shift(u[mu], FORWARD, nu);
+    const LatticeColorMatrix<Real> U_nu_fwd_mu = shift(u[nu], FORWARD, mu);
+    const LatticeColorMatrix<Real> U_nu_bwd_nu = shift(u[nu], BACKWARD, nu);
+    const LatticeColorMatrix<Real> U_mu_bwd_nu = shift(u[mu], BACKWARD, nu);
+    const LatticeColorMatrix<Real> U_nu_fwd_mu_bwd_nu =
+        shift(U_nu_fwd_mu, BACKWARD, nu);
+
+    loadLatticeColorMatrix(u[nu], idx_eo, params, u_nu_x, halo);
+    loadLatticeColorMatrix(U_mu_fwd_nu, idx_eo, params, u_mu_xpnu, halo);
+    loadLatticeColorMatrix(U_nu_fwd_mu, idx_eo, params, u_nu_xpmu, halo);
     tmp = u_nu_x * u_mu_xpnu * u_nu_xpmu.dagger();
     staple += tmp * coeff;
 
-    loadLatticeColorMatrix(sh.U_nu_bwd_nu[nu], idx_eo, params, u_nu_x);
-    loadLatticeColorMatrix(sh.U_mu_bwd_nu[nu], idx_eo, params, u_mu_xpnu);
-    loadLatticeColorMatrix(sh.U_nu_fwd_mu_bwd_nu[nu], idx_eo, params, u_nu_xpmu);
+    loadLatticeColorMatrix(U_nu_bwd_nu, idx_eo, params, u_nu_x, halo);
+    loadLatticeColorMatrix(U_mu_bwd_nu, idx_eo, params, u_mu_xpnu, halo);
+    loadLatticeColorMatrix(U_nu_fwd_mu_bwd_nu, idx_eo, params, u_nu_xpmu, halo);
     tmp = u_nu_x.dagger() * u_mu_xpnu * u_nu_xpmu;
     staple += tmp * coeff;
   }

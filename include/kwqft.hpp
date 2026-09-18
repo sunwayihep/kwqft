@@ -50,6 +50,13 @@ inline void initialize(int argc = 0, char *argv[] = nullptr) {
     printf("SU(%d) gauge theory in %d dimensions\n", NCOLORS, NDIMS);
     printf("Execution space: %s\n", typeid(DefaultExecSpace).name());
     printf("Memory space: %s\n", typeid(DefaultMemSpace).name());
+#ifdef KWQFT_USE_MPI
+#ifdef KWQFT_MPI_DEVICE_AWARE
+    printf("MPI halo: DefaultMemSpace buffers (KWQFT_MPI_DEVICE_AWARE)\n");
+#else
+    printf("MPI halo: DefaultMemSpace if host-accessible, else HostSpace staging\n");
+#endif
+#endif
     printf("==========================================================\n");
   }
 }

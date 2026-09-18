@@ -12,10 +12,12 @@
 #include "complex.hpp"
 #include "constants.hpp"
 #include "gauge_array.hpp"
+#include "gauge_halo.hpp"
 #include "gauge_ops.hpp"
 #include "index.hpp"
 #include "kwqft_common.hpp"
 #include "matrixsun.hpp"
+#include "neighbor_access.hpp"
 #include "perf_stats.hpp"
 #include "shift.hpp"
 #include "lattice_color_matrix_algebra.hpp"
@@ -24,6 +26,7 @@
 #ifdef KWQFT_USE_MPI
 #include <mpi.h>
 #endif
+#include <memory>
 #include <vector>
 
 namespace kwqft {
@@ -35,7 +38,7 @@ namespace kwqft {
 /**
  * @brief Calculate plaquette expectation value
  *
- * Computes the average plaquette using the shift:
+ * Formula style (lazy shift/adj, one reduction kernel per plane):
  *   Tr( U_mu * shift(U_nu,+mu) * adj(shift(U_mu,+nu)) * adj(U_nu) )
  */
 template <typename Real> class Plaquette {
@@ -47,6 +50,7 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
+  std::unique_ptr<GaugeHaloBuffers<Real>> halo_;
   Real plaqValue_;
   Real spatialValue_;
   Real temporalValue_;
@@ -54,8 +58,8 @@ private:
 
 public:
   Plaquette(GaugeT &gauge, const LatticeParams &params)
-      : gauge_(gauge), params_(params), plaqValue_(0),
-        spatialValue_(0), temporalValue_(0), time_(0) {}
+      : gauge_(gauge), params_(params), halo_(make_halo_if_mpi<Real>(params)),
+        plaqValue_(0), spatialValue_(0), temporalValue_(0), time_(0) {}
 
   /**
    * @brief Compute the plaquette.
@@ -65,6 +69,14 @@ public:
 
     auto gaugeView = gauge_.getView();
     int64_t size = gauge_.size();
+    auto params = params_;
+
+    if (halo_) {
+      halo_->exchange(gaugeView.data(), size, params);
+    }
+    const GaugeHaloDevice<Real> halo_dev =
+        halo_ ? halo_->device_view() : GaugeHaloDevice<Real>{};
+    const GaugeHaloDevice<Real> *halo_ptr = halo_ ? &halo_dev : nullptr;
 
     Real plaqSum = 0;
     Real spatialSum = 0;
@@ -74,11 +86,10 @@ public:
 
     for (int mu = 1; mu < NDIMS; ++mu) {
       for (int nu = 0; nu < mu; ++nu) {
-        beginShiftSweep<Real>();
         Real pairSum = realTraceSum(
             u[mu] * shift(u[nu], FORWARD, mu) *
                 adj(shift(u[mu], FORWARD, nu)) * adj(u[nu]),
-            "Plaquette");
+            "Plaquette", halo_ptr);
 
         plaqSum += pairSum;
         if (mu == t_dir() || nu == t_dir()) {

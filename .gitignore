@@ -38,4 +38,10 @@ kokkos-kernels/
 *.log
 *.out
 
-
+*.txt
+build_*/
+jobs*/
+figs_*/
+*.png
+*.csv
+__pycache__/

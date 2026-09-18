@@ -12,9 +12,12 @@
 #include "complex.hpp"
 #include "constants.hpp"
 #include "gauge_array.hpp"
+#include "gauge_halo.hpp"
 #include "gauge_ops.hpp"
 #include "index.hpp"
+#include "neighbor_access.hpp"
 #include "shift.hpp"
+#include "shift_field.hpp"
 #include "kwqft_common.hpp"
 #include "perf_stats.hpp"
 #include "mpi_layout.hpp"
@@ -22,10 +25,12 @@
 #include "msu2.hpp"
 #include "random.hpp"
 
+#include <memory>
+
 namespace kwqft {
 
 //=============================================================================
-// Device functions for staple calculation (see gauge_ops.hpp)
+// Device staple gather — lazy shift views (see gauge_ops.hpp)
 //=============================================================================
 
 /**
@@ -209,12 +214,14 @@ private:
   GaugeT &gauge_;
   RandomGenerator &rng_;
   LatticeParams params_;
+  std::unique_ptr<GaugeHaloBuffers<Real>> halo_;
   double time_;
   int64_t size_;
 
 public:
   HeatBath(GaugeT &gauge, RandomGenerator &rng, const LatticeParams &params)
-      : gauge_(gauge), rng_(rng), params_(params), time_(0.0) {
+      : gauge_(gauge), rng_(rng), params_(params),
+        halo_(make_halo_if_mpi<Real>(params)), time_(0.0) {
     size_ = params.half_volume;
   }
 
@@ -230,31 +237,34 @@ public:
     int64_t size = gauge_.size();
     int64_t halfVol = params.half_volume;
     double betaOverNc = params.beta_over_nc;
+    const bool use_halo = static_cast<bool>(halo_);
 
-    // Loop over parities (even/odd)
     for (int parity = 0; parity < 2; ++parity) {
-      // Loop over directions
-      for (int mu = 0; mu < NDIMS; ++mu) {
-        const LatticeGaugeLinks<Real> u(gaugeView.data(), size);
-        const StapleShifts<Real> staple_sh = make_staple_shifts(u, mu);
+      // One full halo per parity; after each mu, only re-send that direction
+      // (subsequent staples need the just-updated neighbor links).
+      if (use_halo) {
+        halo_->exchange(gaugeView.data(), size, params);
+      }
+      const GaugeHaloDevice<Real> halo_dev =
+          use_halo ? halo_->device_view() : GaugeHaloDevice<Real>{};
 
+      for (int mu = 0; mu < NDIMS; ++mu) {
         Kokkos::parallel_for(
             "HeatBath", range_policy(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
-              // Indexed get_state: one stream per site, no atomics; mapping is
-              // identical across CUDA/HIP/OpenMP (requires num_states >= halfVol).
               auto gen = pool.get_state(static_cast<uint64_t>(id));
-
               ComplexT *gaugePtr = gaugeView.data();
 
-              MatrixT staple =
-                  staple_site(staple_sh, id, parity, mu, params);
+              // Capture halo_dev by value; take address inside the functor
+              // (device-local), never pass a host stack pointer into the kernel.
+              const GaugeHaloDevice<Real> *hp =
+                  use_halo ? &halo_dev : nullptr;
+              MatrixT staple = calculateStapleLazy<Real>(
+                  gaugePtr, size, hp, id, parity, mu, params);
 
-              // Get current link index
-              int64_t idxoddbit = id + parity * halfVol;
-              int64_t muvolume = mu * params.volume;
+              const int64_t idxoddbit = id + parity * halfVol;
+              const int64_t muvolume = mu * params.volume;
 
-              // Load current link
               MatrixT U;
               for (int i = 0; i < NCOLORS; ++i) {
                 for (int j = 0; j < NCOLORS; ++j) {
@@ -263,10 +273,8 @@ public:
                 }
               }
 
-              // Apply heatbath update
               heatBathSun<Real>(U, staple.dagger(), betaOverNc, gen);
 
-              // Store updated link
               for (int i = 0; i < NCOLORS; ++i) {
                 for (int j = 0; j < NCOLORS; ++j) {
                   gaugePtr[idxoddbit + muvolume + (j + i * NCOLORS) * size] =
@@ -274,11 +282,18 @@ public:
                 }
               }
 
-              // Write updated generator state back (no lock was taken)
               pool.free_state(gen);
             });
-        Kokkos::fence();
+        if (use_halo) {
+          Kokkos::fence();
+          if (mu + 1 < NDIMS) {
+            halo_->exchange_dir(gaugeView.data(), size, params, mu);
+          }
+        }
       }
+    }
+    if (!use_halo) {
+      Kokkos::fence();
     }
 
     time_ = timer.seconds();
@@ -370,11 +385,13 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
+  std::unique_ptr<GaugeHaloBuffers<Real>> halo_;
   double time_;
 
 public:
   Overrelaxation(GaugeT &gauge, const LatticeParams &params)
-      : gauge_(gauge), params_(params), time_(0.0) {}
+      : gauge_(gauge), params_(params),
+        halo_(make_halo_if_mpi<Real>(params)), time_(0.0) {}
 
   /**
    * @brief Run one sweep of overrelaxation
@@ -386,22 +403,30 @@ public:
     auto params = params_;
     int64_t size = gauge_.size();
     int64_t halfVol = params.half_volume;
+    const bool use_halo = static_cast<bool>(halo_);
 
     for (int parity = 0; parity < 2; ++parity) {
-      for (int mu = 0; mu < NDIMS; ++mu) {
-        const LatticeGaugeLinks<Real> u(gaugeView.data(), size);
-        const StapleShifts<Real> staple_sh = make_staple_shifts(u, mu);
+      if (use_halo) {
+        halo_->exchange(gaugeView.data(), size, params);
+      }
+      const GaugeHaloDevice<Real> halo_dev =
+          use_halo ? halo_->device_view() : GaugeHaloDevice<Real>{};
 
+      for (int mu = 0; mu < NDIMS; ++mu) {
         Kokkos::parallel_for(
             "Overrelaxation", range_policy(0, halfVol),
             KOKKOS_LAMBDA(const int64_t id) {
               ComplexT *gaugePtr = gaugeView.data();
 
-              MatrixT staple =
-                  staple_site(staple_sh, id, parity, mu, params);
+              // Capture halo_dev by value; take address inside the functor
+              // (device-local), never pass a host stack pointer into the kernel.
+              const GaugeHaloDevice<Real> *hp =
+                  use_halo ? &halo_dev : nullptr;
+              MatrixT staple = calculateStapleLazy<Real>(
+                  gaugePtr, size, hp, id, parity, mu, params);
 
-              int64_t idxoddbit = id + parity * halfVol;
-              int64_t muvolume = mu * params.volume;
+              const int64_t idxoddbit = id + parity * halfVol;
+              const int64_t muvolume = mu * params.volume;
 
               MatrixT U;
               for (int i = 0; i < NCOLORS; ++i) {
@@ -420,8 +445,16 @@ public:
                 }
               }
             });
-        Kokkos::fence();
+        if (use_halo) {
+          Kokkos::fence();
+          if (mu + 1 < NDIMS) {
+            halo_->exchange_dir(gaugeView.data(), size, params, mu);
+          }
+        }
       }
+    }
+    if (!use_halo) {
+      Kokkos::fence();
     }
 
     time_ = timer.seconds();

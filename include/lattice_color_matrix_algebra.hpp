@@ -1,12 +1,11 @@
 /**
  * @file lattice_color_matrix_algebra.hpp
- * @brief SU(N) algebra for \ref LatticeColorMatrix
+ * @brief Lazy SU(N) algebra for \ref LatticeColorMatrix
  *
- * Each operation launches its own Kokkos kernel and writes a dense EO field
- * (buffer from the global \ref ShiftMap pool).
+ * \c shift / \c adj are zero-copy views. Products build \ref LcmProduct;
+ * \c realTraceSum evaluates in one Kokkos reduction.
  *
  * @code
- *   beginShiftSweep<Real>();
  *   const Real tr = realTraceSum(
  *       u[mu] * shift(u[nu], FORWARD, mu) * adj(shift(u[mu], FORWARD, nu)) *
  *       adj(u[nu]));
@@ -18,280 +17,122 @@
 
 #include "constants.hpp"
 #include "matrixsun.hpp"
-#include "shift.hpp"
+#include "neighbor_access.hpp"
 #include "shift_field.hpp"
-#include "shift_map.hpp"
 
 namespace kwqft {
 
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void loadLatticeColorMatrix(
     const LatticeColorMatrix<Real> &field, int64_t idx_eo,
-    const LatticeParams &p, MatrixSun<Real, NCOLORS> &U) {
-  if (field.is_gauge_soa()) {
-    loadGaugeLinkSoa(field.data(), idx_eo, field.link_dir(), field.stride(), p,
-                     U);
-  } else {
-    const int me = LatticeColorMatrix<Real>::site_elems;
-    const int64_t base = idx_eo * static_cast<int64_t>(me);
-    const Complex<Real> *dense = field.data();
-    for (int i = 0; i < NCOLORS; ++i) {
-      for (int j = 0; j < NCOLORS; ++j) {
-        U.e[i][j] = dense[base + j + i * NCOLORS];
-      }
+    const LatticeParams &p, MatrixSun<Real, NCOLORS> &U,
+    const GaugeHaloDevice<Real> *halo = nullptr) {
+  field.load_at(idx_eo, p, halo, U);
+}
+
+/// Hermitian conjugate view (zero-copy).
+template <typename Real>
+KOKKOS_INLINE_FUNCTION LatticeColorMatrix<Real>
+adj(const LatticeColorMatrix<Real> &in, const char * /*label*/ = nullptr) {
+  return in.with_adjoint();
+}
+
+/// Product of N lattice color-matrix views.
+template <typename Real, int N> struct LcmProduct {
+  static_assert(N >= 1 && N <= 8, "LcmProduct arity out of range");
+  LatticeColorMatrix<Real> f[N]{};
+
+  KOKKOS_INLINE_FUNCTION
+  void eval_at(int64_t idx_eo, const LatticeParams &p,
+               const GaugeHaloDevice<Real> *halo,
+               MatrixSun<Real, NCOLORS> &U) const {
+    f[0].load_at(idx_eo, p, halo, U);
+    for (int i = 1; i < N; ++i) {
+      MatrixSun<Real, NCOLORS> Ui;
+      f[i].load_at(idx_eo, p, halo, Ui);
+      U = U * Ui;
     }
   }
-}
+};
 
 template <typename Real>
-KOKKOS_INLINE_FUNCTION void storeLatticeColorMatrix(
-    const MatrixSun<Real, NCOLORS> &U, int64_t idx_eo, Complex<Real> *dense) {
-  const int me = LatticeColorMatrix<Real>::site_elems;
-  const int64_t base = idx_eo * static_cast<int64_t>(me);
-  for (int i = 0; i < NCOLORS; ++i) {
-    for (int j = 0; j < NCOLORS; ++j) {
-      dense[base + j + i * NCOLORS] = U.e[i][j];
-    }
+KOKKOS_INLINE_FUNCTION LcmProduct<Real, 2>
+operator*(const LatticeColorMatrix<Real> &a,
+          const LatticeColorMatrix<Real> &b) {
+  LcmProduct<Real, 2> p;
+  p.f[0] = a;
+  p.f[1] = b;
+  return p;
+}
+
+template <typename Real, int N>
+KOKKOS_INLINE_FUNCTION LcmProduct<Real, N + 1>
+operator*(const LcmProduct<Real, N> &a, const LatticeColorMatrix<Real> &b) {
+  LcmProduct<Real, N + 1> p;
+  for (int i = 0; i < N; ++i) {
+    p.f[i] = a.f[i];
   }
+  p.f[N] = b;
+  return p;
 }
 
-template <typename Real>
-LatticeColorMatrix<Real> allocate_dense_lcm() {
-  auto &map = shiftMap<Real>();
-  return LatticeColorMatrix<Real>::shifted(
-      map.allocate_dense(LatticeColorMatrix<Real>::site_elems));
-}
-
-//=============================================================================
-// Eager Kokkos field operations
-//=============================================================================
-
-/// Hermitian conjugate: \c out(x) = adj(in(x)).
-template <typename Real>
-LatticeColorMatrix<Real> adj(const LatticeColorMatrix<Real> &in,
-                             const char *label = "lcm_adj") {
-  LatticeColorMatrix<Real> out = allocate_dense_lcm<Real>();
-  const int64_t vol = shiftMap<Real>().volume();
-  const Complex<Real> *in_data = in.data();
-  Complex<Real> *out_data = const_cast<Complex<Real> *>(out.data());
-  const int64_t soa_stride = in.stride();
-  const int link_dir = in.link_dir();
-  const bool is_gauge_soa = in.is_gauge_soa();
-  auto dparams = get_device_params();
-
-  Kokkos::parallel_for(
-      label, range_policy(0, vol),
-      KOKKOS_LAMBDA(const int64_t idx_eo) {
-        const LatticeParams p = dparams();
-        MatrixSun<Real, NCOLORS> U;
-        if (is_gauge_soa) {
-          loadGaugeLinkSoa(in_data, idx_eo, link_dir, soa_stride, p, U);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              U.e[i][j] = in_data[base + j + i * NCOLORS];
-            }
-          }
-        }
-        storeLatticeColorMatrix(U.dagger(), idx_eo, out_data);
-      });
-  Kokkos::fence();
-  return out;
-}
-
-/// Pointwise matrix multiply: \c out(x) = a(x) * b(x).
-template <typename Real>
-LatticeColorMatrix<Real>
-multiply(const LatticeColorMatrix<Real> &a, const LatticeColorMatrix<Real> &b,
-         const char *label = "lcm_mul") {
-  LatticeColorMatrix<Real> out = allocate_dense_lcm<Real>();
-  const int64_t vol = shiftMap<Real>().volume();
-  const Complex<Real> *a_data = a.data();
-  const Complex<Real> *b_data = b.data();
-  Complex<Real> *out_data = const_cast<Complex<Real> *>(out.data());
-  const int64_t a_stride = a.stride();
-  const int64_t b_stride = b.stride();
-  const int a_dir = a.link_dir();
-  const int b_dir = b.link_dir();
-  const bool a_soa = a.is_gauge_soa();
-  const bool b_soa = b.is_gauge_soa();
-  auto dparams = get_device_params();
-
-  Kokkos::parallel_for(
-      label, range_policy(0, vol),
-      KOKKOS_LAMBDA(const int64_t idx_eo) {
-        const LatticeParams p = dparams();
-        MatrixSun<Real, NCOLORS> Ua, Ub;
-        if (a_soa) {
-          loadGaugeLinkSoa(a_data, idx_eo, a_dir, a_stride, p, Ua);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              Ua.e[i][j] = a_data[base + j + i * NCOLORS];
-            }
-          }
-        }
-        if (b_soa) {
-          loadGaugeLinkSoa(b_data, idx_eo, b_dir, b_stride, p, Ub);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              Ub.e[i][j] = b_data[base + j + i * NCOLORS];
-            }
-          }
-        }
-        storeLatticeColorMatrix(Ua * Ub, idx_eo, out_data);
-      });
-  Kokkos::fence();
-  return out;
-}
-
-/// Pointwise matrix add: \c out(x) = a(x) + b(x).
-template <typename Real>
-LatticeColorMatrix<Real>
-add(const LatticeColorMatrix<Real> &a, const LatticeColorMatrix<Real> &b,
-    const char *label = "lcm_add") {
-  LatticeColorMatrix<Real> out = allocate_dense_lcm<Real>();
-  const int64_t vol = shiftMap<Real>().volume();
-  const Complex<Real> *a_data = a.data();
-  const Complex<Real> *b_data = b.data();
-  Complex<Real> *out_data = const_cast<Complex<Real> *>(out.data());
-  const int64_t a_stride = a.stride();
-  const int64_t b_stride = b.stride();
-  const int a_dir = a.link_dir();
-  const int b_dir = b.link_dir();
-  const bool a_soa = a.is_gauge_soa();
-  const bool b_soa = b.is_gauge_soa();
-  auto dparams = get_device_params();
-
-  Kokkos::parallel_for(
-      label, range_policy(0, vol),
-      KOKKOS_LAMBDA(const int64_t idx_eo) {
-        const LatticeParams p = dparams();
-        MatrixSun<Real, NCOLORS> Ua, Ub;
-        if (a_soa) {
-          loadGaugeLinkSoa(a_data, idx_eo, a_dir, a_stride, p, Ua);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              Ua.e[i][j] = a_data[base + j + i * NCOLORS];
-            }
-          }
-        }
-        if (b_soa) {
-          loadGaugeLinkSoa(b_data, idx_eo, b_dir, b_stride, p, Ub);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              Ub.e[i][j] = b_data[base + j + i * NCOLORS];
-            }
-          }
-        }
-        storeLatticeColorMatrix(Ua + Ub, idx_eo, out_data);
-      });
-  Kokkos::fence();
-  return out;
-}
-
-/// Pointwise scalar multiply: \c out(x) = coeff * in(x).
-template <typename Real>
-LatticeColorMatrix<Real> scale(const LatticeColorMatrix<Real> &in, Real coeff,
-                               const char *label = "lcm_scale") {
-  LatticeColorMatrix<Real> out = allocate_dense_lcm<Real>();
-  const int64_t vol = shiftMap<Real>().volume();
-  const Complex<Real> *in_data = in.data();
-  Complex<Real> *out_data = const_cast<Complex<Real> *>(out.data());
-  const int64_t soa_stride = in.stride();
-  const int link_dir = in.link_dir();
-  const bool is_gauge_soa = in.is_gauge_soa();
-  auto dparams = get_device_params();
-
-  Kokkos::parallel_for(
-      label, range_policy(0, vol),
-      KOKKOS_LAMBDA(const int64_t idx_eo) {
-        const LatticeParams p = dparams();
-        MatrixSun<Real, NCOLORS> U;
-        if (is_gauge_soa) {
-          loadGaugeLinkSoa(in_data, idx_eo, link_dir, soa_stride, p, U);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              U.e[i][j] = in_data[base + j + i * NCOLORS];
-            }
-          }
-        }
-        storeLatticeColorMatrix(U * coeff, idx_eo, out_data);
-      });
-  Kokkos::fence();
-  return out;
-}
-
-template <typename Real>
-LatticeColorMatrix<Real> operator*(const LatticeColorMatrix<Real> &a,
-                                   const LatticeColorMatrix<Real> &b) {
-  return multiply(a, b);
-}
-
-template <typename Real>
-LatticeColorMatrix<Real> operator+(const LatticeColorMatrix<Real> &a,
-                                   const LatticeColorMatrix<Real> &b) {
-  return add(a, b);
-}
-
-template <typename Real>
-LatticeColorMatrix<Real> operator*(Real coeff, const LatticeColorMatrix<Real> &a) {
-  return scale(a, coeff);
-}
-
-template <typename Real>
-LatticeColorMatrix<Real> operator*(const LatticeColorMatrix<Real> &a, Real coeff) {
-  return scale(a, coeff);
+template <typename Real, int N>
+KOKKOS_INLINE_FUNCTION LcmProduct<Real, N + 1>
+operator*(const LatticeColorMatrix<Real> &a, const LcmProduct<Real, N> &b) {
+  LcmProduct<Real, N + 1> p;
+  p.f[0] = a;
+  for (int i = 0; i < N; ++i) {
+    p.f[i + 1] = b.f[i];
+  }
+  return p;
 }
 
 //=============================================================================
-// Kokkos reductions
+// Reductions
 //=============================================================================
 
-/// Sum of Re Tr(field(x)) over local lattice sites.
 template <typename Real>
 Real realTraceSum(const LatticeColorMatrix<Real> &field,
-                  const char *label = "realTraceSum") {
-  const int64_t vol = shiftMap<Real>().volume();
-  const Complex<Real> *field_data = field.data();
-  const int64_t soa_stride = field.stride();
-  const int link_dir = field.link_dir();
-  const bool is_gauge_soa = field.is_gauge_soa();
+                  const char *label = "realTraceSum",
+                  const GaugeHaloDevice<Real> *halo = nullptr) {
+  const int64_t vol = PARAMS::params.volume;
   auto dparams = get_device_params();
+  const GaugeHaloDevice<Real> halo_cap =
+      halo ? *halo : GaugeHaloDevice<Real>{};
+  const bool have_halo = halo != nullptr;
   Real sum = 0;
 
   Kokkos::parallel_reduce(
       label, range_policy(0, vol),
       KOKKOS_LAMBDA(const int64_t idx_eo, Real &s) {
         const LatticeParams p = dparams();
+        const GaugeHaloDevice<Real> *hp = have_halo ? &halo_cap : nullptr;
         MatrixSun<Real, NCOLORS> U;
-        if (is_gauge_soa) {
-          loadGaugeLinkSoa(field_data, idx_eo, link_dir, soa_stride, p, U);
-        } else {
-          const int me = LatticeColorMatrix<Real>::site_elems;
-          const int64_t base = idx_eo * static_cast<int64_t>(me);
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              U.e[i][j] = field_data[base + j + i * NCOLORS];
-            }
-          }
-        }
+        field.load_at(idx_eo, p, hp, U);
+        s += U.realtrace();
+      },
+      sum);
+  return sum;
+}
+
+template <typename Real, int N>
+Real realTraceSum(const LcmProduct<Real, N> &prod,
+                  const char *label = "realTraceSum",
+                  const GaugeHaloDevice<Real> *halo = nullptr) {
+  const int64_t vol = PARAMS::params.volume;
+  auto dparams = get_device_params();
+  const GaugeHaloDevice<Real> halo_cap =
+      halo ? *halo : GaugeHaloDevice<Real>{};
+  const bool have_halo = halo != nullptr;
+  Real sum = 0;
+
+  Kokkos::parallel_reduce(
+      label, range_policy(0, vol),
+      KOKKOS_LAMBDA(const int64_t idx_eo, Real &s) {
+        const LatticeParams p = dparams();
+        const GaugeHaloDevice<Real> *hp = have_halo ? &halo_cap : nullptr;
+        MatrixSun<Real, NCOLORS> U;
+        prod.eval_at(idx_eo, p, hp, U);
         s += U.realtrace();
       },
       sum);
