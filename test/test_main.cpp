@@ -7,6 +7,7 @@
 
 #include "io_gauge.hpp"
 #include "kwqft.hpp"
+#include "neighbor_access.hpp"
 #ifdef KWQFT_USE_MPI
 #include "mpi_layout.hpp"
 #include <mpi.h>
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <vector>
 
 using namespace kwqft;
 
@@ -25,6 +27,11 @@ void reset_and_initialize_params(const std::vector<int> &lattice_size,
   }
   initializeParams(lattice_size, beta, false, xi0);
 }
+
+/// beta giving a weak-coupling plaquette (~0.6) for any Nc, scaling the
+/// SU(3) value 6.0 with the number of generators: SU(2) 2.25, SU(4) 11.25.
+/// The thermalization range checks below assume this.
+constexpr double kTestBeta = 0.75 * (NCOLORS * NCOLORS - 1);
 
 /// Fill proc_grid with 1s, then set proc_grid[split_dim] = nproc_along_dim.
 inline void fill_proc_grid(int proc_grid[NDIMS], int split_dim,
@@ -66,6 +73,89 @@ template <typename Real> bool test_complex() {
   if (std::abs(c.real() - 3) > 1e-10 || std::abs(c.imag() - (-4)) > 1e-10) {
     printf("  FAILED: conjugate\n");
     return false;
+  }
+
+  printf("  PASSED\n");
+  return true;
+}
+
+bool test_halo_slot_roundtrip() {
+  printf("Testing halo region slot layout round-trip...\n");
+
+  LatticeParams p;
+  p.volume = 1;
+  for (int d = 0; d < NDIMS; ++d) {
+    p.grid[d] = 8;
+    p.volume *= 8;
+    p.proc_grid[d] = 1;
+  }
+  p.half_volume = p.volume / 2;
+
+  for (int code = 0; code < HALO_CODE_COUNT; ++code) {
+    if (code == HALO_CENTER_CODE) {
+      continue;
+    }
+    int off[NDIMS];
+    halo_code_to_offset(code, off);
+    int nnz = 0;
+    for (int d = 0; d < NDIMS; ++d) {
+      nnz += (off[d] != 0);
+    }
+    if (nnz == 0 || nnz > 2) {
+      continue;
+    }
+    const int64_t vol = halo_region_volume(off, p);
+    const int sdim = halo_region_split_dim(off, p);
+    std::vector<char> seen(static_cast<size_t>(vol), 0);
+    int x[NDIMS];
+    auto walk = [&](auto &&self, int dim) -> bool {
+      if (dim == NDIMS) {
+        const int64_t slot = halo_region_slot(off, x, sdim, vol, p);
+        if (slot < 0 || slot >= vol) {
+          printf("  FAILED: slot %lld out of range (vol %lld)\n",
+                 static_cast<long long>(slot), static_cast<long long>(vol));
+          return false;
+        }
+        if (seen[static_cast<size_t>(slot)]) {
+          printf("  FAILED: duplicate slot %lld\n",
+                 static_cast<long long>(slot));
+          return false;
+        }
+        seen[static_cast<size_t>(slot)] = 1;
+        int y[NDIMS];
+        halo_slot_to_coords(off, sdim, vol, slot, y, p);
+        for (int d = 0; d < NDIMS; ++d) {
+          if (y[d] != x[d]) {
+            printf("  FAILED: inverse mismatch at slot %lld dim %d "
+                   "(%d != %d)\n",
+                   static_cast<long long>(slot), d, y[d], x[d]);
+            return false;
+          }
+        }
+        return true;
+      }
+      if (off[dim] != 0) {
+        x[dim] = (off[dim] == -1) ? p.grid[dim] - 1 : 0;
+        return self(self, dim + 1);
+      }
+      for (int v = 0; v < p.grid[dim]; ++v) {
+        x[dim] = v;
+        if (!self(self, dim + 1)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    if (!walk(walk, 0)) {
+      return false;
+    }
+    for (int64_t s = 0; s < vol; ++s) {
+      if (!seen[static_cast<size_t>(s)]) {
+        printf("  FAILED: slot %lld never produced\n",
+               static_cast<long long>(s));
+        return false;
+      }
+    }
   }
 
   printf("  PASSED\n");
@@ -216,7 +306,7 @@ template <typename Real> bool test_heatbath_thermalization() {
 
   // Create a small lattice
   std::vector<int> lattice_size(NDIMS, 4);
-  double beta = 6.0;
+  double beta = kTestBeta;
   reset_and_initialize_params(lattice_size, beta);
   auto &params = PARAMS::params;
 
@@ -238,7 +328,7 @@ template <typename Real> bool test_heatbath_thermalization() {
   plaq.run();
   Real plaq_value = plaq.value();
 
-  // For beta=6.0 in 4D, the plaquette should be around 0.59-0.61
+  // For beta/Nc=2 in 4D, the plaquette should be around 0.6
   // For a small lattice and few sweeps, allow a wider range
   if (plaq_value < 0.3 || plaq_value > 1.0) {
     printf("  FAILED: plaquette = %f is outside reasonable range\n",
@@ -256,7 +346,7 @@ template <typename Real> bool test_overrelaxation_trajectory() {
   printf("Testing HeatBath + Overrelaxation trajectory...\n");
 
   std::vector<int> lattice_size(NDIMS, 4);
-  reset_and_initialize_params(lattice_size, 6.0);
+  reset_and_initialize_params(lattice_size, kTestBeta);
   auto &params = PARAMS::params;
 
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
@@ -510,7 +600,7 @@ template <typename Real> bool test_mpi_shift_heatbath() {
   }
   mpi_setup_cartesian(proc_grid, global_lattice_arr);
   std::vector<int> pg(proc_grid, proc_grid + NDIMS);
-  initializeParamsDistributed(global_lattice, pg, 6.0, false);
+  initializeParamsDistributed(global_lattice, pg, kTestBeta, false);
 
   auto &params = PARAMS::params;
 
@@ -573,6 +663,10 @@ int main(int argc, char *argv[]) {
   }
 
   if (run_serial_suite) {
+    if (test_halo_slot_roundtrip())
+      passed++;
+    else
+      failed++;
     if (test_complex<double>())
       passed++;
     else

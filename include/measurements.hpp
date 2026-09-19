@@ -50,7 +50,6 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
-  std::unique_ptr<GaugeHaloBuffers<Real>> halo_;
   Real plaqValue_;
   Real spatialValue_;
   Real temporalValue_;
@@ -58,8 +57,8 @@ private:
 
 public:
   Plaquette(GaugeT &gauge, const LatticeParams &params)
-      : gauge_(gauge), params_(params), halo_(make_halo_if_mpi<Real>(params)),
-        plaqValue_(0), spatialValue_(0), temporalValue_(0), time_(0) {}
+      : gauge_(gauge), params_(params), plaqValue_(0), spatialValue_(0),
+        temporalValue_(0), time_(0) {}
 
   /**
    * @brief Compute the plaquette.
@@ -69,14 +68,15 @@ public:
 
     auto gaugeView = gauge_.getView();
     int64_t size = gauge_.size();
-    auto params = params_;
 
-    if (halo_) {
-      halo_->exchange(gaugeView.data(), size, params);
+    // Shared halo: only blocks left stale by the last update are exchanged.
+    GaugeHaloBuffers<Real> *halo = gauge_.halo(params_);
+    if (halo) {
+      halo->refresh(gaugeView.data(), size);
     }
     const GaugeHaloDevice<Real> halo_dev =
-        halo_ ? halo_->device_view() : GaugeHaloDevice<Real>{};
-    const GaugeHaloDevice<Real> *halo_ptr = halo_ ? &halo_dev : nullptr;
+        halo ? halo->device_view() : GaugeHaloDevice<Real>{};
+    const GaugeHaloDevice<Real> *halo_ptr = halo ? &halo_dev : nullptr;
 
     Real plaqSum = 0;
     Real spatialSum = 0;
@@ -212,31 +212,71 @@ public:
   using PolyHostView = typename PolyView::host_mirror_type;
 
 private:
+  using PinnedView = Kokkos::View<MatrixT *, Kokkos::SharedHostPinnedSpace>;
+
   GaugeT &gauge_;
   LatticeParams params_;
   ComplexT polyValue_;
   double time_;
-  PolyView local_poly_;
-  PolyHostView host_poly_;
-  std::vector<MatrixT> recv_poly_;
+  PolyView local_poly_;  // per-rank partial products (device)
+  PolyView recv_poly_;   // partner's partial products (device)
+  PinnedView host_send_; // staging when MPI cannot read device memory
+  PinnedView host_recv_;
   int64_t poly_spatial_vol_{0};
+#ifdef KWQFT_USE_MPI
+  MPI_Comm t_comm_{MPI_COMM_NULL}; // ranks sharing my spatial block, ordered in t
+#endif
 
   void ensure_mpi_workspace(int64_t spatialVolume) {
-    if (poly_spatial_vol_ == spatialVolume &&
-        static_cast<int64_t>(local_poly_.extent(0)) == spatialVolume) {
+    if (poly_spatial_vol_ == spatialVolume) {
       return;
     }
     local_poly_ = PolyView(
         Kokkos::view_alloc("PolyakovLoop_local", Kokkos::WithoutInitializing),
         spatialVolume);
-    host_poly_ = Kokkos::create_mirror_view(local_poly_);
-    recv_poly_.assign(static_cast<size_t>(spatialVolume), MatrixT{});
+    recv_poly_ = PolyView(
+        Kokkos::view_alloc("PolyakovLoop_recv", Kokkos::WithoutInitializing),
+        spatialVolume);
+    const int64_t n_stage =
+        kwqft_mpi_uses_device_buffers() ? 0 : spatialVolume;
+    host_send_ = PinnedView(
+        Kokkos::view_alloc("PolyakovLoop_hsend", Kokkos::WithoutInitializing),
+        n_stage);
+    host_recv_ = PinnedView(
+        Kokkos::view_alloc("PolyakovLoop_hrecv", Kokkos::WithoutInitializing),
+        n_stage);
     poly_spatial_vol_ = spatialVolume;
   }
+
+#ifdef KWQFT_USE_MPI
+  MPI_Comm t_comm() {
+    if (t_comm_ == MPI_COMM_NULL) {
+      int remain[NDIMS];
+      for (int d = 0; d < NDIMS; ++d) {
+        remain[d] = (d == NDIMS - 1) ? 1 : 0;
+      }
+      MPI_Cart_sub(kwqft_mpi_cart_comm(), remain, &t_comm_);
+    }
+    return t_comm_;
+  }
+#endif
 
 public:
   PolyakovLoop(GaugeT &gauge, const LatticeParams &params)
       : gauge_(gauge), params_(params), polyValue_(0, 0), time_(0) {}
+
+  ~PolyakovLoop() {
+#ifdef KWQFT_USE_MPI
+    int finalized = 0;
+    MPI_Finalized(&finalized);
+    if (!finalized && t_comm_ != MPI_COMM_NULL) {
+      MPI_Comm_free(&t_comm_);
+    }
+#endif
+  }
+
+  PolyakovLoop(const PolyakovLoop &) = delete;
+  PolyakovLoop &operator=(const PolyakovLoop &) = delete;
 
   /**
    * @brief Compute the Polyakov loop
@@ -271,6 +311,11 @@ public:
     Real polyIm = 0;
 
     if (mpi_time_split) {
+      // Each rank forms the product of its local temporal links (device).
+      // The t-column then combines them by a binary tree: at stride s, rank
+      // t (t % 2s == 0) receives from t+s and forms P[t..t+2s) = P_t * P_{t+s}
+      // on the device. log2(t_nproc) messages per rank instead of a serial
+      // chain; t_coord 0 ends with the full loop and reduces the trace.
       ensure_mpi_workspace(spatialVolume);
       auto local_poly = local_poly_;
 
@@ -299,33 +344,56 @@ public:
           });
       Kokkos::fence();
 
-      Kokkos::deep_copy(host_poly_, local_poly_);
-      MatrixT *poly_ptr = host_poly_.data();
-
+      bool holds_result = true;
 #ifdef KWQFT_USE_MPI
+      constexpr bool dev_mpi = kwqft_mpi_uses_device_buffers();
       const int nbytes =
           static_cast<int>(spatialVolume * static_cast<int64_t>(sizeof(MatrixT)));
-      if (t_coord > 0) {
-        const int rank_down = mpi_cart_neighbor(tDir, -1);
-        MPI_Recv(recv_poly_.data(), nbytes, MPI_BYTE, rank_down, 8100 + t_coord,
-                 kwqft_mpi_cart_comm(), MPI_STATUS_IGNORE);
-        for (int64_t s = 0; s < spatialVolume; ++s) {
-          poly_ptr[s] = recv_poly_[static_cast<size_t>(s)] * poly_ptr[s];
+      MPI_Comm tc = t_comm();
+      auto recv_poly = recv_poly_;
+      for (int stride = 1; stride < t_nproc; stride *= 2) {
+        const int rel = t_coord % (2 * stride);
+        if (rel == 0) {
+          const int partner = t_coord + stride;
+          if (partner >= t_nproc) {
+            continue; // no partner at this level (non power of two)
+          }
+          void *rbuf = dev_mpi ? static_cast<void *>(recv_poly_.data())
+                               : static_cast<void *>(host_recv_.data());
+          MPI_Recv(rbuf, nbytes, MPI_BYTE, partner, 8100 + stride, tc,
+                   MPI_STATUS_IGNORE);
+          if (!dev_mpi) {
+            Kokkos::deep_copy(recv_poly_, host_recv_);
+          }
+          Kokkos::parallel_for(
+              "PolyakovLoop_combine", range_policy(0, spatialVolume),
+              KOKKOS_LAMBDA(const int64_t s) {
+                local_poly(s) = local_poly(s) * recv_poly(s);
+              });
+          Kokkos::fence();
+        } else if (rel == stride) {
+          const int partner = t_coord - stride;
+          const void *sbuf = static_cast<const void *>(local_poly_.data());
+          if (!dev_mpi) {
+            Kokkos::deep_copy(host_send_, local_poly_);
+            sbuf = static_cast<const void *>(host_send_.data());
+          }
+          MPI_Send(sbuf, nbytes, MPI_BYTE, partner, 8100 + stride, tc);
+          holds_result = false;
+          break;
         }
-      }
-      if (t_coord < t_nproc - 1) {
-        const int rank_up = mpi_cart_neighbor(tDir, +1);
-        MPI_Send(poly_ptr, nbytes, MPI_BYTE, rank_up, 8100 + t_coord + 1,
-                 kwqft_mpi_cart_comm());
       }
 #endif
 
-      if (t_coord == t_nproc - 1) {
-        for (int64_t s = 0; s < spatialVolume; ++s) {
-          const ComplexT tr = poly_ptr[s].trace() / Real(NCOLORS);
-          polyRe += tr.real();
-          polyIm += tr.imag();
-        }
+      if (holds_result) {
+        Kokkos::parallel_reduce(
+            "PolyakovLoop_trace", range_policy(0, spatialVolume),
+            KOKKOS_LAMBDA(const int64_t s, Real &reSum, Real &imSum) {
+              const ComplexT tr = local_poly(s).trace() / Real(NCOLORS);
+              reSum += tr.real();
+              imSum += tr.imag();
+            },
+            polyRe, polyIm);
       }
     } else {
       Kokkos::parallel_reduce(
@@ -468,6 +536,7 @@ private:
   LatticeParams params_;
   double time_;
 
+public:
   /**
    * @brief Gram-Schmidt reunitarization for a single matrix
    */
@@ -535,12 +604,21 @@ private:
     }
   }
 
-public:
+  /// Functor form of \ref reunitarizeMatrix (for ghost buffers).
+  struct MatrixFunctor {
+    KOKKOS_INLINE_FUNCTION void operator()(MatrixT &U) const {
+      reunitarizeMatrix(U);
+    }
+  };
+
   Reunitarize(GaugeT &gauge, const LatticeParams &params)
       : gauge_(gauge), params_(params), time_(0) {}
 
   /**
    * @brief Reunitarize all links
+   *
+   * MPI: the same deterministic link-wise map is applied to the ghost copies,
+   * so the shared halo stays valid and no re-exchange is needed afterwards.
    */
   void run() {
     Kokkos::Timer timer;
@@ -561,6 +639,12 @@ public:
           storeGaugeMatrix(gaugePtr, linkIdx, size, atype, U);
         });
     Kokkos::fence();
+
+    if (GaugeHaloBuffers<Real> *halo = gauge_.halo(params_)) {
+      if (halo->all_valid()) {
+        halo->apply_to_ghosts(MatrixFunctor{});
+      }
+    }
 
     time_ = timer.seconds();
   }

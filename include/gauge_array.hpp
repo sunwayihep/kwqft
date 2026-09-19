@@ -11,10 +11,13 @@
 
 #include "complex.hpp"
 #include "constants.hpp"
+#include "gauge_halo.hpp"
 #include "gauge_load_save.hpp"
 #include "index.hpp"
 #include "kwqft_common.hpp"
 #include "matrixsun.hpp"
+
+#include <memory>
 
 namespace kwqft {
 
@@ -41,6 +44,9 @@ private:
   bool evenOdd_;            // Even/odd ordering (required; must be true)
   int64_t size_;            // Number of links (int64_t for large lattices)
   bool allocated_;          // Whether memory is allocated
+  /// MPI ghost buffers shared by every kernel operating on this field
+  /// (created lazily; null when not domain-decomposed).
+  std::shared_ptr<GaugeHaloBuffers<Real>> halo_;
 
 public:
   // Default constructor
@@ -104,6 +110,33 @@ public:
   const host_ViewT &getHostView() const { return hostData_; }
 
   //=========================================================================
+  // MPI halo (shared across kernels)
+  //=========================================================================
+
+  /**
+   * @brief Shared halo buffers for \p params, or nullptr when not decomposed.
+   *
+   * All update/measurement kernels use this single instance so that ghost
+   * data sent by one kernel is reused by the next.
+   */
+  GaugeHaloBuffers<Real> *halo(const LatticeParams &params) {
+    if (!params.mpi || params.nproc <= 1) {
+      return nullptr;
+    }
+    if (!halo_) {
+      halo_ = std::make_shared<GaugeHaloBuffers<Real>>(params);
+    }
+    return halo_.get();
+  }
+
+  /// Call after any whole-field write that bypasses the halo bookkeeping.
+  void invalidate_halo() {
+    if (halo_) {
+      halo_->invalidate();
+    }
+  }
+
+  //=========================================================================
   // Memory management
   //=========================================================================
 
@@ -157,6 +190,7 @@ public:
     if (allocated_) {
       data_ = ViewT();
       hostData_ = host_ViewT();
+      halo_.reset();
       size_ = 0;
       allocated_ = false;
     }
@@ -169,6 +203,7 @@ public:
     if (!allocated_)
       return;
     Kokkos::deep_copy(data_, ComplexT::zero());
+    invalidate_halo();
   }
 
   //=========================================================================
@@ -183,7 +218,10 @@ public:
   /**
    * @brief Copy data from host to device
    */
-  void copyToDevice() { Kokkos::deep_copy(data_, hostData_); }
+  void copyToDevice() {
+    Kokkos::deep_copy(data_, hostData_);
+    invalidate_halo();
+  }
 
   //=========================================================================
   // Matrix access functions (for kernels)
@@ -229,6 +267,7 @@ public:
                            static_cast<int64_t>(size), atype, I);
         });
     Kokkos::fence();
+    invalidate_halo();
   }
 
   /**

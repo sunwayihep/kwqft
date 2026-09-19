@@ -54,7 +54,7 @@ inline void initialize(int argc = 0, char *argv[] = nullptr) {
 #ifdef KWQFT_MPI_DEVICE_AWARE
     printf("MPI halo: DefaultMemSpace buffers (KWQFT_MPI_DEVICE_AWARE)\n");
 #else
-    printf("MPI halo: DefaultMemSpace if host-accessible, else HostSpace staging\n");
+    printf("MPI halo: DefaultMemSpace if host-accessible, else pinned Host staging\n");
 #endif
 #endif
     printf("==========================================================\n");

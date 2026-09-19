@@ -197,6 +197,52 @@ overrelaxationSun(MatrixSun<Real, NCOLORS> &U,
 }
 
 //=============================================================================
+// Per-site update bodies (shared by the serial and the MPI boundary/interior
+// launches)
+//=============================================================================
+
+template <typename Real, typename PoolType>
+KOKKOS_INLINE_FUNCTION void
+heatBathUpdateSite(Complex<Real> *gaugePtr, int64_t soa_stride,
+                   const GaugeHaloDevice<Real> *halo, int64_t id, int parity,
+                   int mu, const LatticeParams &params, ArrayType atype,
+                   double betaOverNc, const PoolType &pool) {
+  using MatrixT = MatrixSun<Real, NCOLORS>;
+  auto gen = pool.get_state(static_cast<uint64_t>(id));
+
+  MatrixT staple = calculateStapleLazy<Real>(gaugePtr, soa_stride, halo, id,
+                                             parity, mu, params, atype);
+
+  const int64_t idxoddbit = id + parity * params.half_volume;
+  const int64_t link_base = idxoddbit + mu * params.volume;
+
+  MatrixT U;
+  loadGaugeMatrix(gaugePtr, link_base, soa_stride, atype, U);
+  heatBathSun<Real>(U, staple.dagger(), betaOverNc, gen);
+  storeGaugeMatrix(gaugePtr, link_base, soa_stride, atype, U);
+
+  pool.free_state(gen);
+}
+
+template <typename Real>
+KOKKOS_INLINE_FUNCTION void
+overrelaxUpdateSite(Complex<Real> *gaugePtr, int64_t soa_stride,
+                    const GaugeHaloDevice<Real> *halo, int64_t id, int parity,
+                    int mu, const LatticeParams &params, ArrayType atype) {
+  using MatrixT = MatrixSun<Real, NCOLORS>;
+  MatrixT staple = calculateStapleLazy<Real>(gaugePtr, soa_stride, halo, id,
+                                             parity, mu, params, atype);
+
+  const int64_t idxoddbit = id + parity * params.half_volume;
+  const int64_t link_base = idxoddbit + mu * params.volume;
+
+  MatrixT U;
+  loadGaugeMatrix(gaugePtr, link_base, soa_stride, atype, U);
+  overrelaxationSun<Real>(U, staple.dagger());
+  storeGaugeMatrix(gaugePtr, link_base, soa_stride, atype, U);
+}
+
+//=============================================================================
 // HeatBath class
 //=============================================================================
 
@@ -214,19 +260,22 @@ private:
   GaugeT &gauge_;
   RandomGenerator &rng_;
   LatticeParams params_;
-  std::unique_ptr<GaugeHaloBuffers<Real>> halo_;
   double time_;
   int64_t size_;
 
 public:
   HeatBath(GaugeT &gauge, RandomGenerator &rng, const LatticeParams &params)
-      : gauge_(gauge), rng_(rng), params_(params),
-        halo_(make_halo_if_mpi<Real>(params)), time_(0.0) {
+      : gauge_(gauge), rng_(rng), params_(params), time_(0.0) {
     size_ = params.half_volume;
   }
 
   /**
    * @brief Run one sweep of pseudo-heatbath
+   *
+   * MPI: the shared halo is refreshed only if stale. For every (parity, mu)
+   * the face sites are updated first, their links are sent while the interior
+   * sites are updated, so communication overlaps computation. At the end of
+   * the sweep every ghost block is up to date.
    */
   void run() {
     Kokkos::Timer timer;
@@ -238,52 +287,56 @@ public:
     int64_t halfVol = params.half_volume;
     double betaOverNc = params.beta_over_nc;
     const ArrayType atype = gauge_.type();
-    const bool use_halo = static_cast<bool>(halo_);
+    GaugeHaloBuffers<Real> *halo = gauge_.halo(params_);
 
-    for (int parity = 0; parity < 2; ++parity) {
-      // One full halo per parity; after each mu, only re-send that direction
-      // (subsequent staples need the just-updated neighbor links).
-      if (use_halo) {
-        halo_->exchange(gaugeView.data(), size, params);
-      }
-      const GaugeHaloDevice<Real> halo_dev =
-          use_halo ? halo_->device_view() : GaugeHaloDevice<Real>{};
-
-      for (int mu = 0; mu < NDIMS; ++mu) {
-        Kokkos::parallel_for(
-            "HeatBath", range_policy(0, halfVol),
-            KOKKOS_LAMBDA(const int64_t id) {
-              auto gen = pool.get_state(static_cast<uint64_t>(id));
-              ComplexT *gaugePtr = gaugeView.data();
-
-              // Capture halo_dev by value; take address inside the functor
-              // (device-local), never pass a host stack pointer into the kernel.
-              const GaugeHaloDevice<Real> *hp =
-                  use_halo ? &halo_dev : nullptr;
-              MatrixT staple = calculateStapleLazy<Real>(
-                  gaugePtr, size, hp, id, parity, mu, params, atype);
-
-              const int64_t idxoddbit = id + parity * halfVol;
-              const int64_t link_base = idxoddbit + mu * params.volume;
-
-              MatrixT U;
-              loadGaugeMatrix(gaugePtr, link_base, size, atype, U);
-              heatBathSun<Real>(U, staple.dagger(), betaOverNc, gen);
-              storeGaugeMatrix(gaugePtr, link_base, size, atype, U);
-
-              pool.free_state(gen);
-            });
-        if (use_halo) {
-          Kokkos::fence();
-          if (mu + 1 < NDIMS) {
-            halo_->exchange_dir(gaugeView.data(), size, params, mu);
-          }
+    if (halo == nullptr) {
+      for (int parity = 0; parity < 2; ++parity) {
+        for (int mu = 0; mu < NDIMS; ++mu) {
+          Kokkos::parallel_for(
+              "HeatBath", range_policy(0, halfVol),
+              KOKKOS_LAMBDA(const int64_t id) {
+                heatBathUpdateSite<Real>(gaugeView.data(), size, nullptr, id,
+                                         parity, mu, params, atype, betaOverNc,
+                                         pool);
+              });
         }
       }
-    }
-    if (!use_halo) {
       Kokkos::fence();
+      time_ = timer.seconds();
+      return;
     }
+
+    halo->refresh(gaugeView.data(), size);
+    // Capture by value; take the address inside the functor (device-local).
+    const GaugeHaloDevice<Real> halo_dev = halo->device_view();
+
+    for (int parity = 0; parity < 2; ++parity) {
+      const auto bnd = halo->boundary_sites(parity);
+      const auto inr = halo->interior_sites(parity);
+      for (int mu = 0; mu < NDIMS; ++mu) {
+        Kokkos::parallel_for(
+            "HeatBath_boundary", range_policy(0, bnd.extent(0)),
+            KOKKOS_LAMBDA(const int64_t i) {
+              heatBathUpdateSite<Real>(gaugeView.data(), size, &halo_dev,
+                                       bnd(i), parity, mu, params, atype,
+                                       betaOverNc, pool);
+            });
+        Kokkos::fence();
+        // Interior sites never read ghosts; nullptr is required while the
+        // (mu, parity) MPI is in flight and would overwrite d_recv_.
+        halo->begin_exchange(gaugeView.data(), size, mu, parity);
+
+        Kokkos::parallel_for(
+            "HeatBath_interior", range_policy(0, inr.extent(0)),
+            KOKKOS_LAMBDA(const int64_t i) {
+              heatBathUpdateSite<Real>(gaugeView.data(), size, nullptr, inr(i),
+                                       parity, mu, params, atype, betaOverNc,
+                                       pool);
+            });
+        halo->end_exchange();
+      }
+    }
+    Kokkos::fence();
 
     time_ = timer.seconds();
   }
@@ -374,16 +427,14 @@ public:
 private:
   GaugeT &gauge_;
   LatticeParams params_;
-  std::unique_ptr<GaugeHaloBuffers<Real>> halo_;
   double time_;
 
 public:
   Overrelaxation(GaugeT &gauge, const LatticeParams &params)
-      : gauge_(gauge), params_(params),
-        halo_(make_halo_if_mpi<Real>(params)), time_(0.0) {}
+      : gauge_(gauge), params_(params), time_(0.0) {}
 
   /**
-   * @brief Run one sweep of overrelaxation
+   * @brief Run one sweep of overrelaxation (same halo schedule as HeatBath)
    */
   void run() {
     Kokkos::Timer timer;
@@ -393,47 +444,50 @@ public:
     int64_t size = gauge_.size();
     int64_t halfVol = params.half_volume;
     const ArrayType atype = gauge_.type();
-    const bool use_halo = static_cast<bool>(halo_);
+    GaugeHaloBuffers<Real> *halo = gauge_.halo(params_);
 
-    for (int parity = 0; parity < 2; ++parity) {
-      if (use_halo) {
-        halo_->exchange(gaugeView.data(), size, params);
-      }
-      const GaugeHaloDevice<Real> halo_dev =
-          use_halo ? halo_->device_view() : GaugeHaloDevice<Real>{};
-
-      for (int mu = 0; mu < NDIMS; ++mu) {
-        Kokkos::parallel_for(
-            "Overrelaxation", range_policy(0, halfVol),
-            KOKKOS_LAMBDA(const int64_t id) {
-              ComplexT *gaugePtr = gaugeView.data();
-
-              // Capture halo_dev by value; take address inside the functor
-              // (device-local), never pass a host stack pointer into the kernel.
-              const GaugeHaloDevice<Real> *hp =
-                  use_halo ? &halo_dev : nullptr;
-              MatrixT staple = calculateStapleLazy<Real>(
-                  gaugePtr, size, hp, id, parity, mu, params, atype);
-
-              const int64_t idxoddbit = id + parity * halfVol;
-              const int64_t link_base = idxoddbit + mu * params.volume;
-
-              MatrixT U;
-              loadGaugeMatrix(gaugePtr, link_base, size, atype, U);
-              overrelaxationSun<Real>(U, staple.dagger());
-              storeGaugeMatrix(gaugePtr, link_base, size, atype, U);
-            });
-        if (use_halo) {
-          Kokkos::fence();
-          if (mu + 1 < NDIMS) {
-            halo_->exchange_dir(gaugeView.data(), size, params, mu);
-          }
+    if (halo == nullptr) {
+      for (int parity = 0; parity < 2; ++parity) {
+        for (int mu = 0; mu < NDIMS; ++mu) {
+          Kokkos::parallel_for(
+              "Overrelaxation", range_policy(0, halfVol),
+              KOKKOS_LAMBDA(const int64_t id) {
+                overrelaxUpdateSite<Real>(gaugeView.data(), size, nullptr, id,
+                                          parity, mu, params, atype);
+              });
         }
       }
-    }
-    if (!use_halo) {
       Kokkos::fence();
+      time_ = timer.seconds();
+      return;
     }
+
+    halo->refresh(gaugeView.data(), size);
+    const GaugeHaloDevice<Real> halo_dev = halo->device_view();
+
+    for (int parity = 0; parity < 2; ++parity) {
+      const auto bnd = halo->boundary_sites(parity);
+      const auto inr = halo->interior_sites(parity);
+      for (int mu = 0; mu < NDIMS; ++mu) {
+        Kokkos::parallel_for(
+            "Overrelaxation_boundary", range_policy(0, bnd.extent(0)),
+            KOKKOS_LAMBDA(const int64_t i) {
+              overrelaxUpdateSite<Real>(gaugeView.data(), size, &halo_dev,
+                                        bnd(i), parity, mu, params, atype);
+            });
+        Kokkos::fence();
+        halo->begin_exchange(gaugeView.data(), size, mu, parity);
+
+        Kokkos::parallel_for(
+            "Overrelaxation_interior", range_policy(0, inr.extent(0)),
+            KOKKOS_LAMBDA(const int64_t i) {
+              overrelaxUpdateSite<Real>(gaugeView.data(), size, nullptr,
+                                        inr(i), parity, mu, params, atype);
+            });
+        halo->end_exchange();
+      }
+    }
+    Kokkos::fence();
 
     time_ = timer.seconds();
   }

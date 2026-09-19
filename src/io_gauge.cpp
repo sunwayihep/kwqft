@@ -354,6 +354,7 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
 
   Kokkos::deep_copy(gauge.getView(), host_view);
   Kokkos::fence();
+  gauge.invalidate_halo();
 }
 
 template void save_gauge_binary<float, float>(const GaugeArray<float> &,
