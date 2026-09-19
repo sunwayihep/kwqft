@@ -14,8 +14,9 @@ namespace kwqft {
 /**
  * @brief Save gauge configuration in binary layout.
  *
- * Serial: writes local lattice in normal site order (even/odd storage).
- * MPI: all ranks participate; rank 0 assembles the global lattice and writes.
+ * Writes full SU(N) matrices per link (Nc×Nc complex) in normal site order.
+ * If the in-memory gauge uses SOA12, the third row is reconstructed before
+ * writing. Serial: local lattice; MPI: rank 0 assembles the global lattice.
  *
  * @tparam Real         In-memory gauge precision
  * @tparam RealSaveConf On-disk precision

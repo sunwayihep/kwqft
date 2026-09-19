@@ -1,12 +1,13 @@
 /**
  * @file shift.hpp
- * @brief EO index shift and SOA gauge link load helpers
+ * @brief EO index shift and SOA / SOA12 gauge link load helpers
  */
 
 #ifndef KWQFT_SHIFT_HPP
 #define KWQFT_SHIFT_HPP
 
 #include "constants.hpp"
+#include "gauge_load_save.hpp"
 #include "index.hpp"
 #include "kwqft_common.hpp"
 #include "matrixsun.hpp"
@@ -30,19 +31,29 @@ KOKKOS_INLINE_FUNCTION int64_t shift_eo(int64_t idx_eo, int mu, int lmu,
 }
 
 /**
- * @brief Load one SU(N) link from SOA gauge storage (even/odd layout).
+ * @brief Load one SU(N) link from SOA / SOA12 gauge storage (even/odd layout).
  */
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
 loadGaugeLinkSoa(const Complex<Real> *gaugePtr, int64_t idx_eo, int dir,
                  int64_t soa_stride, const LatticeParams &p,
-                 MatrixSun<Real, NCOLORS> &U) {
+                 MatrixSun<Real, NCOLORS> &U,
+                 ArrayType atype = ArrayType::SOA) {
   const int64_t base = idx_eo + static_cast<int64_t>(dir) * p.volume;
-  for (int i = 0; i < NCOLORS; ++i) {
-    for (int j = 0; j < NCOLORS; ++j) {
-      U.e[i][j] = gaugePtr[base + (j + i * NCOLORS) * soa_stride];
-    }
-  }
+  loadGaugeMatrix(gaugePtr, base, soa_stride, atype, U);
+}
+
+/**
+ * @brief Store one SU(N) link into SOA / SOA12 gauge storage.
+ */
+template <typename Real>
+KOKKOS_INLINE_FUNCTION void
+storeGaugeLinkSoa(Complex<Real> *gaugePtr, int64_t idx_eo, int dir,
+                  int64_t soa_stride, const LatticeParams &p,
+                  const MatrixSun<Real, NCOLORS> &U,
+                  ArrayType atype = ArrayType::SOA) {
+  const int64_t base = idx_eo + static_cast<int64_t>(dir) * p.volume;
+  storeGaugeMatrix(gaugePtr, base, soa_stride, atype, U);
 }
 
 } // namespace kwqft

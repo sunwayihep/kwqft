@@ -56,6 +56,16 @@ void print_usage(const char *prog_name) {
 
 namespace {
 
+/// SU(3) single-process uses SOA12; MPI / other Nc use full SOA.
+ArrayType default_gauge_array_type() {
+#if NCOLORS == 3
+  if (mpi_comm_size() == 1) {
+    return ArrayType::SOA12;
+  }
+#endif
+  return ArrayType::SOA;
+}
+
 bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
                         std::vector<int> &lattice_size, double &beta, int &ntraj,
                         double &xi0, int &nhb, int &novr, int &nsave,
@@ -216,8 +226,9 @@ bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
 template <typename Real>
 void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
   auto &params = PARAMS::params;
+  const ArrayType array_type = default_gauge_array_type();
 
-  GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
+  GaugeArray<Real> gauge(array_type, MemoryLocation::Device,
                          params.volume * NDIMS, true);
   if (mpi_comm_rank() == 0) {
     gauge.details();
@@ -301,6 +312,7 @@ void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
     if (traj > num_warmup && traj % nsave == 0) {
       std::string filename =
           save_prefix + "_cfg_" + std::to_string(traj) + ".bin";
+      // File format is always full SU(N) matrices (SOA12 reconstructed on save).
       save_gauge_binary<double, double>(gauge, filename, false);
     }
   }

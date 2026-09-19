@@ -11,6 +11,7 @@
 
 #include "complex.hpp"
 #include "constants.hpp"
+#include "gauge_load_save.hpp"
 #include "index.hpp"
 #include "kwqft_common.hpp"
 #include "matrixsun.hpp"
@@ -110,16 +111,7 @@ public:
    * @brief Get number of complex elements per link
    */
   int getNumElems() const {
-    switch (arrayType_) {
-    case ArrayType::SOA:
-      return NCOLORS * NCOLORS;
-    case ArrayType::SOA12:
-      return 6;
-    case ArrayType::SOA8:
-      return 4;
-    default:
-      return NCOLORS * NCOLORS;
-    }
+    return gauge_complex_elems(arrayType_);
   }
 
   /**
@@ -203,44 +195,8 @@ public:
   KOKKOS_INLINE_FUNCTION
   MatrixT get(int k) const {
     MatrixT m;
-    const ComplexT *ptr = data_.data();
-
-    switch (arrayType_) {
-    case ArrayType::SOA:
-      for (int i = 0; i < NCOLORS; ++i) {
-        for (int j = 0; j < NCOLORS; ++j) {
-          m.e[i][j] = ptr[k + (j + i * NCOLORS) * size_];
-        }
-      }
-      break;
-
-    case ArrayType::SOA12:
-      // Store first two rows, reconstruct third
-      for (int i = 0; i < NCOLORS - 1; ++i) {
-        for (int j = 0; j < NCOLORS; ++j) {
-          m.e[i][j] = ptr[k + (j + i * NCOLORS) * size_];
-        }
-      }
-      // Reconstruct third row for SU(3)
-      if constexpr (NCOLORS == 3) {
-        m.e[2][0] = ~(m.e[0][1] * m.e[1][2] - m.e[0][2] * m.e[1][1]);
-        m.e[2][1] = ~(m.e[0][2] * m.e[1][0] - m.e[0][0] * m.e[1][2]);
-        m.e[2][2] = ~(m.e[0][0] * m.e[1][1] - m.e[0][1] * m.e[1][0]);
-      }
-      break;
-
-    case ArrayType::SOA8:
-      // 8-parameter reconstruction for SU(3)
-      if constexpr (NCOLORS == 3) {
-        m.e[0][1] = ptr[k];
-        m.e[0][2] = ptr[k + size_];
-        m.e[1][0] = ptr[k + 2 * size_];
-        ComplexT theta = ptr[k + 3 * size_];
-        // Full reconstruction would go here
-        // This is simplified; full implementation needs reconstruct8p
-      }
-      break;
-    }
+    loadGaugeMatrix(data_.data(), static_cast<int64_t>(k), size_, arrayType_,
+                    m);
     return m;
   }
 
@@ -249,37 +205,8 @@ public:
    */
   KOKKOS_INLINE_FUNCTION
   void set(const MatrixT &A, int k) {
-    ComplexT *ptr = data_.data();
-
-    switch (arrayType_) {
-    case ArrayType::SOA:
-      for (int i = 0; i < NCOLORS; ++i) {
-        for (int j = 0; j < NCOLORS; ++j) {
-          ptr[k + (j + i * NCOLORS) * size_] = A.e[i][j];
-        }
-      }
-      break;
-
-    case ArrayType::SOA12:
-      for (int i = 0; i < NCOLORS - 1; ++i) {
-        for (int j = 0; j < NCOLORS; ++j) {
-          ptr[k + (j + i * NCOLORS) * size_] = A.e[i][j];
-        }
-      }
-      break;
-
-    case ArrayType::SOA8:
-      if constexpr (NCOLORS == 3) {
-        ptr[k] = A.e[0][1];
-        ComplexT theta;
-        theta.real() = A.e[0][0].phase();
-        theta.imag() = A.e[2][0].phase();
-        ptr[k + size_] = A.e[0][2];
-        ptr[k + 2 * size_] = A.e[1][0];
-        ptr[k + 3 * size_] = theta;
-      }
-      break;
-    }
+    storeGaugeMatrix(data_.data(), static_cast<int64_t>(k), size_, arrayType_,
+                     A);
   }
 
   //=========================================================================
@@ -292,28 +219,14 @@ public:
   void initCold() {
     const int size = size_;
     auto data_view = data_;
-    const int num_elems = getNumElems();
     const ArrayType atype = arrayType_;
 
     Kokkos::parallel_for(
         "GaugeArray::initCold", range_policy(0, size),
         KOKKOS_LAMBDA(const int k) {
           MatrixT I = MatrixT::identity();
-          ComplexT *ptr = data_view.data();
-
-          if (atype == ArrayType::SOA) {
-            for (int i = 0; i < NCOLORS; ++i) {
-              for (int j = 0; j < NCOLORS; ++j) {
-                ptr[k + (j + i * NCOLORS) * size] = I.e[i][j];
-              }
-            }
-          } else if (atype == ArrayType::SOA12) {
-            for (int i = 0; i < NCOLORS - 1; ++i) {
-              for (int j = 0; j < NCOLORS; ++j) {
-                ptr[k + (j + i * NCOLORS) * size] = I.e[i][j];
-              }
-            }
-          }
+          storeGaugeMatrix(data_view.data(), static_cast<int64_t>(k),
+                           static_cast<int64_t>(size), atype, I);
         });
     Kokkos::fence();
   }

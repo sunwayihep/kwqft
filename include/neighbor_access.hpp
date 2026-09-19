@@ -89,7 +89,8 @@ KOKKOS_INLINE_FUNCTION void
 loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
                       const GaugeHaloDevice<Real> *halo, const int x[NDIMS],
                       int dir, const LatticeParams &p,
-                      MatrixSun<Real, NCOLORS> &U) {
+                      MatrixSun<Real, NCOLORS> &U,
+                      ArrayType atype = ArrayType::SOA) {
   int off[NDIMS];
   int xw[NDIMS];
   bool need_halo = false;
@@ -122,7 +123,7 @@ loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
 
   if (!need_halo) {
     const int64_t idx_eo = coords_to_eo_idx(xw, p);
-    loadGaugeLinkSoa(gaugePtr, idx_eo, dir, soa_stride, p, U);
+    loadGaugeLinkSoa(gaugePtr, idx_eo, dir, soa_stride, p, U, atype);
     return;
   }
 

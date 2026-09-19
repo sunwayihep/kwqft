@@ -237,6 +237,7 @@ public:
     int64_t size = gauge_.size();
     int64_t halfVol = params.half_volume;
     double betaOverNc = params.beta_over_nc;
+    const ArrayType atype = gauge_.type();
     const bool use_halo = static_cast<bool>(halo_);
 
     for (int parity = 0; parity < 2; ++parity) {
@@ -260,27 +261,15 @@ public:
               const GaugeHaloDevice<Real> *hp =
                   use_halo ? &halo_dev : nullptr;
               MatrixT staple = calculateStapleLazy<Real>(
-                  gaugePtr, size, hp, id, parity, mu, params);
+                  gaugePtr, size, hp, id, parity, mu, params, atype);
 
               const int64_t idxoddbit = id + parity * halfVol;
-              const int64_t muvolume = mu * params.volume;
+              const int64_t link_base = idxoddbit + mu * params.volume;
 
               MatrixT U;
-              for (int i = 0; i < NCOLORS; ++i) {
-                for (int j = 0; j < NCOLORS; ++j) {
-                  U.e[i][j] = gaugePtr[idxoddbit + muvolume +
-                                        (j + i * NCOLORS) * size];
-                }
-              }
-
+              loadGaugeMatrix(gaugePtr, link_base, size, atype, U);
               heatBathSun<Real>(U, staple.dagger(), betaOverNc, gen);
-
-              for (int i = 0; i < NCOLORS; ++i) {
-                for (int j = 0; j < NCOLORS; ++j) {
-                  gaugePtr[idxoddbit + muvolume + (j + i * NCOLORS) * size] =
-                      U.e[i][j];
-                }
-              }
+              storeGaugeMatrix(gaugePtr, link_base, size, atype, U);
 
               pool.free_state(gen);
             });
@@ -329,7 +318,7 @@ public:
   long long bytes() const {
     // Read: 7 links for staple + 1 link to update + RNG state
     // Write: 1 link + RNG state
-    int numParams = NCOLORS * NCOLORS * 2; // SOA format
+    int numParams = gauge_num_params(gauge_.type());
     // RNG state size: ~48 bytes (similar to cuRNGState)
     long long rngStateSize = 48LL;
     long long bytesPerSite =
@@ -403,6 +392,7 @@ public:
     auto params = params_;
     int64_t size = gauge_.size();
     int64_t halfVol = params.half_volume;
+    const ArrayType atype = gauge_.type();
     const bool use_halo = static_cast<bool>(halo_);
 
     for (int parity = 0; parity < 2; ++parity) {
@@ -423,27 +413,15 @@ public:
               const GaugeHaloDevice<Real> *hp =
                   use_halo ? &halo_dev : nullptr;
               MatrixT staple = calculateStapleLazy<Real>(
-                  gaugePtr, size, hp, id, parity, mu, params);
+                  gaugePtr, size, hp, id, parity, mu, params, atype);
 
               const int64_t idxoddbit = id + parity * halfVol;
-              const int64_t muvolume = mu * params.volume;
+              const int64_t link_base = idxoddbit + mu * params.volume;
 
               MatrixT U;
-              for (int i = 0; i < NCOLORS; ++i) {
-                for (int j = 0; j < NCOLORS; ++j) {
-                  U.e[i][j] = gaugePtr[idxoddbit + muvolume +
-                                        (j + i * NCOLORS) * size];
-                }
-              }
-
+              loadGaugeMatrix(gaugePtr, link_base, size, atype, U);
               overrelaxationSun<Real>(U, staple.dagger());
-
-              for (int i = 0; i < NCOLORS; ++i) {
-                for (int j = 0; j < NCOLORS; ++j) {
-                  gaugePtr[idxoddbit + muvolume + (j + i * NCOLORS) * size] =
-                      U.e[i][j];
-                }
-              }
+              storeGaugeMatrix(gaugePtr, link_base, size, atype, U);
             });
         if (use_halo) {
           Kokkos::fence();
@@ -485,7 +463,7 @@ public:
    * @brief Calculate bytes read/written
    */
   long long bytes() const {
-    int numParams = NCOLORS * NCOLORS * 2;
+    int numParams = gauge_num_params(gauge_.type());
     long long bytesPerSite = 20LL * numParams * sizeof(Real);
     return bytesPerSite * params_.half_volume * 2 * NDIMS;
   }

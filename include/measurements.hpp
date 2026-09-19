@@ -82,7 +82,7 @@ public:
     Real spatialSum = 0;
     Real temporalSum = 0;
 
-    const LatticeGaugeLinks<Real> u(gaugeView.data(), size);
+    const LatticeGaugeLinks<Real> u(gaugeView.data(), size, gauge_.type());
 
     for (int mu = 1; mu < NDIMS; ++mu) {
       for (int nu = 0; nu < mu; ++nu) {
@@ -157,7 +157,7 @@ public:
    *
    */
   long long bytes() const {
-    int numParams = NCOLORS * NCOLORS * 2; // SOA format (real + imag)
+    int numParams = gauge_num_params(gauge_.type());
     return (22LL * numParams + 4LL) * params_.volume * sizeof(Real);
   }
 
@@ -247,6 +247,7 @@ public:
     auto gaugeView = gauge_.getView();
     auto params = params_;
     int64_t size = gauge_.size();
+    const ArrayType atype = gauge_.type();
 
     int64_t spatialVolume = 1;
     for (int i = 0; i < NDIMS - 1; ++i) {
@@ -291,7 +292,7 @@ public:
               x[tDir] = t;
               const int64_t idx_eo = coords_to_eo_idx(x, params);
               MatrixT uT;
-              loadGaugeLinkSoa(gaugePtr, idx_eo, tDir, size, params, uT);
+              loadGaugeLinkSoa(gaugePtr, idx_eo, tDir, size, params, uT, atype);
               poly = poly * uT;
             }
             local_poly(spatialIdx) = poly;
@@ -346,7 +347,7 @@ public:
               x[tDir] = t;
               const int64_t idx_eo = coords_to_eo_idx(x, params);
               MatrixT uT;
-              loadGaugeLinkSoa(gaugePtr, idx_eo, tDir, size, params, uT);
+              loadGaugeLinkSoa(gaugePtr, idx_eo, tDir, size, params, uT, atype);
               poly = poly * uT;
             }
 
@@ -410,7 +411,7 @@ public:
     for (int i = 0; i < NDIMS - 1; ++i) {
       spatialVolume *= params_.grid[i];
     }
-    int numParams = NCOLORS * NCOLORS * 2;
+    int numParams = gauge_num_params(gauge_.type());
     return spatialVolume * (numParams * nt + 2LL) * sizeof(Real);
   }
 
@@ -547,30 +548,17 @@ public:
     auto gaugeView = gauge_.getView();
     int64_t size = gauge_.size();      // volume * NDIMS
     int64_t totalLinks = params_.size; // volume * NDIMS
+    const ArrayType atype = gauge_.type();
 
     Kokkos::parallel_for(
         "Reunitarize", range_policy(0, totalLinks),
         KOKKOS_LAMBDA(const int64_t linkIdx) {
           ComplexT *gaugePtr = gaugeView.data();
 
-          // Load matrix from SOA format
-          // Index: linkIdx + elemIdx * size
           MatrixT U;
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              U.e[i][j] = gaugePtr[linkIdx + (j + i * NCOLORS) * size];
-            }
-          }
-
-          // Reunitarize
+          loadGaugeMatrix(gaugePtr, linkIdx, size, atype, U);
           reunitarizeMatrix(U);
-
-          // Store back
-          for (int i = 0; i < NCOLORS; ++i) {
-            for (int j = 0; j < NCOLORS; ++j) {
-              gaugePtr[linkIdx + (j + i * NCOLORS) * size] = U.e[i][j];
-            }
-          }
+          storeGaugeMatrix(gaugePtr, linkIdx, size, atype, U);
         });
     Kokkos::fence();
 
@@ -605,7 +593,7 @@ public:
    * @brief Calculate bytes read/written
    */
   long long bytes() const {
-    int numParams = NCOLORS * NCOLORS * 2;
+    int numParams = gauge_num_params(gauge_.type());
     // Read + write one matrix per link
     return 2LL * numParams * sizeof(Real) * params_.size;
   }

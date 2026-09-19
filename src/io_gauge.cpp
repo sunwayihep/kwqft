@@ -65,14 +65,8 @@ void cast_links_from_file(const MatrixSun<RealSaveConf, NCOLORS> *src,
 template <typename Real>
 void store_gauge_link_soa(Complex<Real> *gauge_ptr, int64_t idx_eo, int dir,
                           int64_t soa_stride, const LatticeParams &p,
-                          const MatrixSun<Real, NCOLORS> &u) {
-  const int64_t base =
-      idx_eo + dir * p.volume;
-  for (int i = 0; i < NCOLORS; ++i) {
-    for (int j = 0; j < NCOLORS; ++j) {
-      gauge_ptr[base + (j + i * NCOLORS) * soa_stride] = u.e[i][j];
-    }
-  }
+                          const MatrixSun<Real, NCOLORS> &u, ArrayType atype) {
+  storeGaugeLinkSoa(gauge_ptr, idx_eo, dir, soa_stride, p, u, atype);
 }
 
 bool config_params_mismatch(const LatticeParams &p, const int grid_dim[NDIMS],
@@ -96,16 +90,13 @@ void save_gauge_binary(const GaugeArray<Real> &gauge, const std::string &filenam
     KWQFT_ERROR("save_gauge_binary requires even/odd gauge storage");
     return;
   }
-  if (gauge.type() != ArrayType::SOA) {
-    KWQFT_ERROR("save_gauge_binary requires SOA gauge storage");
-    return;
-  }
 
   Kokkos::fence();
   auto host_view = Kokkos::create_mirror_view(gauge.getView());
   Kokkos::deep_copy(host_view, gauge.getView());
   const Complex<Real> *gauge_ptr = host_view.data();
   const int64_t soa_stride = gauge.size();
+  const ArrayType atype = gauge.type();
 
   const int rank = mpi_comm_rank();
   const int master = 0;
@@ -172,7 +163,9 @@ void save_gauge_binary(const GaugeArray<Real> &gauge, const std::string &filenam
       }
       const int64_t idx_eo = coords_to_eo_idx(lx, p);
       for (int dir = 0; dir < NDIMS; ++dir) {
-        loadGaugeLinkSoa(gauge_ptr, idx_eo, dir, soa_stride, p, links[dir]);
+        // Reconstruct full SU(N) if storage is SOA12; file always stores Nc×Nc.
+        loadGaugeLinkSoa(gauge_ptr, idx_eo, dir, soa_stride, p, links[dir],
+                         atype);
       }
     }
 
@@ -219,10 +212,6 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
 
   if (!gauge.even_odd()) {
     KWQFT_ERROR("load_gauge_binary requires even/odd gauge storage");
-    return;
-  }
-  if (gauge.type() != ArrayType::SOA) {
-    KWQFT_ERROR("load_gauge_binary requires SOA gauge storage");
     return;
   }
 
@@ -292,6 +281,7 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
   auto host_view = Kokkos::create_mirror_view(gauge.getView());
   Complex<Real> *gauge_ptr = host_view.data();
   const int64_t soa_stride = gauge.size();
+  const ArrayType atype = gauge.type();
 
   MatrixSun<Real, NCOLORS> links[NDIMS];
   MatrixSun<RealSaveConf, NCOLORS> links_file[NDIMS];
@@ -350,8 +340,9 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
       }
       const int64_t idx_eo = coords_to_eo_idx(lx, p);
       for (int dir = 0; dir < NDIMS; ++dir) {
-        store_gauge_link_soa(gauge_ptr, idx_eo, dir, soa_stride, p,
-                             links[dir]);
+        // File has full SU(N); pack into SOA or SOA12 device storage.
+        store_gauge_link_soa(gauge_ptr, idx_eo, dir, soa_stride, p, links[dir],
+                             atype);
       }
     }
   }
