@@ -88,13 +88,20 @@ public:
   KOKKOS_INLINE_FUNCTION
   void load_at(int64_t idx_eo, const LatticeParams &p,
                const GaugeHaloDevice<Real> *halo, MatrixT &U) const {
-    // No shifts: load at the evaluation site directly.
+    // Address resolution only; the Nc^2 element copy (and the adjoint, folded
+    // into that copy) happens exactly once at the end. Each branch below is
+    // scalar index arithmetic, so device code size stays O(Nc^2), not
+    // O(branches * Nc^2).
+    loadGaugeLinkRef(resolve_at(idx_eo, p, halo), adjoint_, U);
+  }
+
+  /// Locate the matrix this view evaluates to at EO site \p idx_eo.
+  KOKKOS_INLINE_FUNCTION
+  GaugeLinkRef<Real> resolve_at(int64_t idx_eo, const LatticeParams &p,
+                                const GaugeHaloDevice<Real> *halo) const {
+    // No shifts: the evaluation site itself.
     if (n_shifts_ == 0) {
-      loadGaugeLinkSoa(data_, idx_eo, link_dir_, stride_, p, U, atype_);
-      if (adjoint_) {
-        U = U.dagger();
-      }
-      return;
+      return gaugeLinkRefSoa(data_, idx_eo, link_dir_, stride_, p, atype_);
     }
 
     // Fast path: every shift direction is local (no MPI split).
@@ -128,16 +135,12 @@ public:
         x[d] = v;
       }
       const int64_t idx = coords_to_eo_idx(x, p);
-      loadGaugeLinkSoa(data_, idx, link_dir_, stride_, p, U, atype_);
-    } else {
-      // May leave the subdomain; halo path handles out-of-range coords.
-      // Halo buffers are always full SOA; local interior uses atype_.
-      loadGaugeLinkAtCoords(data_, stride_, halo, x, link_dir_, p, U, atype_);
+      return gaugeLinkRefSoa(data_, idx, link_dir_, stride_, p, atype_);
     }
-
-    if (adjoint_) {
-      U = U.dagger();
-    }
+    // May leave the subdomain; halo path handles out-of-range coords.
+    // Halo buffers are always full SOA; local interior uses atype_.
+    return resolveGaugeLinkAtCoords(data_, stride_, halo, x, link_dir_, p,
+                                    atype_);
   }
 
 private:

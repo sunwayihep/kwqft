@@ -15,15 +15,15 @@
 #include "gauge_halo.hpp"
 #include "gauge_ops.hpp"
 #include "index.hpp"
+#include "kwqft_common.hpp"
+#include "matrixsun.hpp"
+#include "mpi_layout.hpp"
+#include "msu2.hpp"
 #include "neighbor_access.hpp"
+#include "perf_stats.hpp"
+#include "random.hpp"
 #include "shift.hpp"
 #include "shift_field.hpp"
-#include "kwqft_common.hpp"
-#include "perf_stats.hpp"
-#include "mpi_layout.hpp"
-#include "matrixsun.hpp"
-#include "msu2.hpp"
-#include "random.hpp"
 
 #include <memory>
 
@@ -243,6 +243,49 @@ overrelaxUpdateSite(Complex<Real> *gaugePtr, int64_t soa_stride,
 }
 
 //=============================================================================
+// One device kernel per update kind.
+//
+// Serial (all sites, no halo), MPI boundary (site list, halo) and MPI
+// interior (site list, no halo) share a single lambda: the site-id source and
+// the halo pointer are uniform runtime flags. Three separately instantiated
+// kernels per (algorithm, Real) triple the device code nvcc must optimise,
+// which for large Nc dominates compile time.
+//=============================================================================
+
+using SiteList = Kokkos::View<int64_t *, DefaultMemSpace>;
+
+template <typename Real, typename PoolType>
+void launchHeatBathSweep(const char *label, int64_t n, const SiteList &list,
+                         bool has_list, Complex<Real> *gaugePtr, int64_t size,
+                         const GaugeHaloDevice<Real> &halo_dev, bool use_halo,
+                         int parity, int mu, const LatticeParams &params,
+                         ArrayType atype, double betaOverNc,
+                         const PoolType &pool) {
+  Kokkos::parallel_for(
+      label, range_policy(0, n), KOKKOS_LAMBDA(const int64_t i) {
+        const int64_t id = has_list ? list(i) : i;
+        heatBathUpdateSite<Real>(gaugePtr, size, use_halo ? &halo_dev : nullptr,
+                                 id, parity, mu, params, atype, betaOverNc,
+                                 pool);
+      });
+}
+
+template <typename Real>
+void launchOverrelaxSweep(const char *label, int64_t n, const SiteList &list,
+                          bool has_list, Complex<Real> *gaugePtr, int64_t size,
+                          const GaugeHaloDevice<Real> &halo_dev, bool use_halo,
+                          int parity, int mu, const LatticeParams &params,
+                          ArrayType atype) {
+  Kokkos::parallel_for(
+      label, range_policy(0, n), KOKKOS_LAMBDA(const int64_t i) {
+        const int64_t id = has_list ? list(i) : i;
+        overrelaxUpdateSite<Real>(gaugePtr, size,
+                                  use_halo ? &halo_dev : nullptr, id, parity,
+                                  mu, params, atype);
+      });
+}
+
+//=============================================================================
 // HeatBath class
 //=============================================================================
 
@@ -287,18 +330,17 @@ public:
     int64_t halfVol = params.half_volume;
     double betaOverNc = params.beta_over_nc;
     const ArrayType atype = gauge_.type();
+    ComplexT *gaugePtr = gaugeView.data();
     GaugeHaloBuffers<Real> *halo = gauge_.halo(params_);
 
     if (halo == nullptr) {
+      const SiteList none;
+      const GaugeHaloDevice<Real> no_halo{};
       for (int parity = 0; parity < 2; ++parity) {
         for (int mu = 0; mu < NDIMS; ++mu) {
-          Kokkos::parallel_for(
-              "HeatBath", range_policy(0, halfVol),
-              KOKKOS_LAMBDA(const int64_t id) {
-                heatBathUpdateSite<Real>(gaugeView.data(), size, nullptr, id,
-                                         parity, mu, params, atype, betaOverNc,
-                                         pool);
-              });
+          launchHeatBathSweep<Real>("HeatBath", halfVol, none, false, gaugePtr,
+                                    size, no_halo, false, parity, mu, params,
+                                    atype, betaOverNc, pool);
         }
       }
       Kokkos::fence();
@@ -306,33 +348,25 @@ public:
       return;
     }
 
-    halo->refresh(gaugeView.data(), size);
-    // Capture by value; take the address inside the functor (device-local).
+    halo->refresh(gaugePtr, size);
+    // Captured by value; the functor takes its address device-side.
     const GaugeHaloDevice<Real> halo_dev = halo->device_view();
 
     for (int parity = 0; parity < 2; ++parity) {
-      const auto bnd = halo->boundary_sites(parity);
-      const auto inr = halo->interior_sites(parity);
+      const SiteList &bnd = halo->boundary_sites(parity);
+      const SiteList &inr = halo->interior_sites(parity);
       for (int mu = 0; mu < NDIMS; ++mu) {
-        Kokkos::parallel_for(
-            "HeatBath_boundary", range_policy(0, bnd.extent(0)),
-            KOKKOS_LAMBDA(const int64_t i) {
-              heatBathUpdateSite<Real>(gaugeView.data(), size, &halo_dev,
-                                       bnd(i), parity, mu, params, atype,
-                                       betaOverNc, pool);
-            });
+        launchHeatBathSweep<Real>("HeatBath_boundary", bnd.extent(0), bnd, true,
+                                  gaugePtr, size, halo_dev, true, parity, mu,
+                                  params, atype, betaOverNc, pool);
         Kokkos::fence();
-        // Interior sites never read ghosts; nullptr is required while the
-        // (mu, parity) MPI is in flight and would overwrite d_recv_.
-        halo->begin_exchange(gaugeView.data(), size, mu, parity);
+        // Interior sites never read ghosts; use_halo=false is required while
+        // the (mu, parity) MPI is in flight and would overwrite d_recv_.
+        halo->begin_exchange(gaugePtr, size, mu, parity);
 
-        Kokkos::parallel_for(
-            "HeatBath_interior", range_policy(0, inr.extent(0)),
-            KOKKOS_LAMBDA(const int64_t i) {
-              heatBathUpdateSite<Real>(gaugeView.data(), size, nullptr, inr(i),
-                                       parity, mu, params, atype, betaOverNc,
-                                       pool);
-            });
+        launchHeatBathSweep<Real>("HeatBath_interior", inr.extent(0), inr, true,
+                                  gaugePtr, size, halo_dev, false, parity, mu,
+                                  params, atype, betaOverNc, pool);
         halo->end_exchange();
       }
     }
@@ -358,7 +392,8 @@ public:
     long long phbFlop =
         NCOLORS * NCOLORS * NCOLORS +
         (NCOLORS * (NCOLORS - 1) / 2) * (46LL + 48LL + 56LL * NCOLORS);
-    long long stapleFlop = static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 84LL;
+    long long stapleFlop =
+        static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 84LL;
     long long threadFlop = (stapleFlop + phbFlop) * size_;
 #endif
     // Factor of 2*NDIMS = 2 parities * NDIMS directions
@@ -444,17 +479,17 @@ public:
     int64_t size = gauge_.size();
     int64_t halfVol = params.half_volume;
     const ArrayType atype = gauge_.type();
+    ComplexT *gaugePtr = gaugeView.data();
     GaugeHaloBuffers<Real> *halo = gauge_.halo(params_);
 
     if (halo == nullptr) {
+      const SiteList none;
+      const GaugeHaloDevice<Real> no_halo{};
       for (int parity = 0; parity < 2; ++parity) {
         for (int mu = 0; mu < NDIMS; ++mu) {
-          Kokkos::parallel_for(
-              "Overrelaxation", range_policy(0, halfVol),
-              KOKKOS_LAMBDA(const int64_t id) {
-                overrelaxUpdateSite<Real>(gaugeView.data(), size, nullptr, id,
-                                          parity, mu, params, atype);
-              });
+          launchOverrelaxSweep<Real>("Overrelaxation", halfVol, none, false,
+                                     gaugePtr, size, no_halo, false, parity, mu,
+                                     params, atype);
         }
       }
       Kokkos::fence();
@@ -462,28 +497,22 @@ public:
       return;
     }
 
-    halo->refresh(gaugeView.data(), size);
+    halo->refresh(gaugePtr, size);
     const GaugeHaloDevice<Real> halo_dev = halo->device_view();
 
     for (int parity = 0; parity < 2; ++parity) {
-      const auto bnd = halo->boundary_sites(parity);
-      const auto inr = halo->interior_sites(parity);
+      const SiteList &bnd = halo->boundary_sites(parity);
+      const SiteList &inr = halo->interior_sites(parity);
       for (int mu = 0; mu < NDIMS; ++mu) {
-        Kokkos::parallel_for(
-            "Overrelaxation_boundary", range_policy(0, bnd.extent(0)),
-            KOKKOS_LAMBDA(const int64_t i) {
-              overrelaxUpdateSite<Real>(gaugeView.data(), size, &halo_dev,
-                                        bnd(i), parity, mu, params, atype);
-            });
+        launchOverrelaxSweep<Real>("Overrelaxation_boundary", bnd.extent(0),
+                                   bnd, true, gaugePtr, size, halo_dev, true,
+                                   parity, mu, params, atype);
         Kokkos::fence();
-        halo->begin_exchange(gaugeView.data(), size, mu, parity);
+        halo->begin_exchange(gaugePtr, size, mu, parity);
 
-        Kokkos::parallel_for(
-            "Overrelaxation_interior", range_policy(0, inr.extent(0)),
-            KOKKOS_LAMBDA(const int64_t i) {
-              overrelaxUpdateSite<Real>(gaugeView.data(), size, nullptr,
-                                        inr(i), parity, mu, params, atype);
-            });
+        launchOverrelaxSweep<Real>("Overrelaxation_interior", inr.extent(0),
+                                   inr, true, gaugePtr, size, halo_dev, false,
+                                   parity, mu, params, atype);
         halo->end_exchange();
       }
     }
@@ -506,7 +535,8 @@ public:
     long long ovrFlop =
         NCOLORS * NCOLORS * NCOLORS +
         (NCOLORS * (NCOLORS - 1) / 2) * (46LL + 48LL + 56LL * NCOLORS);
-    long long stapleFlop = static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 84LL;
+    long long stapleFlop =
+        static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 84LL;
     long long threadFlop = (stapleFlop + ovrFlop) * params_.half_volume;
 #endif
     // Factor of 2*NDIMS = 2 parities * NDIMS directions

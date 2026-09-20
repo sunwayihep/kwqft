@@ -38,8 +38,7 @@ calculateStapleLazy(const Complex<Real> *gaugePtr, int64_t soa_stride,
                     ArrayType atype = ArrayType::SOA) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
   const LatticeGaugeLinks<Real> u(gaugePtr, soa_stride, atype);
-  const int64_t idx_eo =
-      id + static_cast<int64_t>(oddbit) * params.half_volume;
+  const int64_t idx_eo = id + static_cast<int64_t>(oddbit) * params.half_volume;
 
   MatrixT staple = MatrixT::zero();
   MatrixT link, buf;
@@ -69,8 +68,8 @@ calculateStapleLazy(const Complex<Real> *gaugePtr, int64_t soa_stride,
     staple += link;
 
     // DOWN: U_ν†(x−ν) U_μ(x−ν) U_ν(x−ν+μ)
-    loadLatticeColorMatrix(U_nu_bwd_nu, idx_eo, params, buf, halo);
-    link = buf.dagger();
+    // adj() view: the dagger is folded into the load, no extra transpose.
+    loadLatticeColorMatrix(adj(U_nu_bwd_nu), idx_eo, params, link, halo);
     loadLatticeColorMatrix(U_mu_bwd_nu, idx_eo, params, buf, halo);
     link *= buf;
     loadLatticeColorMatrix(U_nu_fwd_mu_bwd_nu, idx_eo, params, buf, halo);

@@ -163,21 +163,65 @@ template <typename Real> struct GaugeHaloDevice {
   int split_dim[HALO_CODE_COUNT]{};
 };
 
+/**
+ * @brief Where one link matrix lives: element (i, j) at
+ *        \c ptr[(j + i*Nc) * stride].
+ *
+ * Every address-resolution path (local SOA, halo buffer, absent block) ends in
+ * one of these so the Nc^2 element copy is emitted once per load
+ * (see \ref loadMatrixStrided). \c ptr == nullptr means the zero matrix.
+ * \c soa12 marks Nc==3 two-row storage that needs reconstruction.
+ */
+template <typename Real> struct GaugeLinkRef {
+  const Complex<Real> *ptr{nullptr};
+  int64_t stride{1};
+  bool soa12{false};
+};
+
+template <typename Real>
+KOKKOS_INLINE_FUNCTION GaugeLinkRef<Real>
+gaugeLinkRefSoa(const Complex<Real> *gaugePtr, int64_t idx_eo, int dir,
+                int64_t soa_stride, const LatticeParams &p, ArrayType atype) {
+  GaugeLinkRef<Real> r;
+  r.ptr = gaugePtr + idx_eo + static_cast<int64_t>(dir) * p.volume;
+  r.stride = soa_stride;
+  r.soa12 = (NCOLORS == 3) && (atype == ArrayType::SOA12);
+  return r;
+}
+
+template <typename Real>
+KOKKOS_INLINE_FUNCTION GaugeLinkRef<Real>
+gaugeLinkRefGhost(const Complex<Real> *buf, int64_t face_vol, int64_t slot,
+                  int dir) {
+  GaugeLinkRef<Real> r;
+  if (buf != nullptr) {
+    const int64_t me = static_cast<int64_t>(NCOLORS * NCOLORS);
+    r.ptr = buf + (static_cast<int64_t>(dir) * face_vol + slot) * me;
+  }
+  r.stride = 1;
+  return r;
+}
+
+/// Materialise \p ref into \p U (or U^dagger). Single copy loop.
+template <typename Real>
+KOKKOS_INLINE_FUNCTION void loadGaugeLinkRef(const GaugeLinkRef<Real> &ref,
+                                             bool adjoint,
+                                             MatrixSun<Real, NCOLORS> &U) {
+  if constexpr (NCOLORS == 3) {
+    if (ref.soa12) {
+      loadGaugeMatrix(ref.ptr, int64_t(0), ref.stride, ArrayType::SOA12, U,
+                      adjoint);
+      return;
+    }
+  }
+  loadMatrixStrided(ref.ptr, ref.stride, adjoint, U);
+}
+
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
 loadGhostFaceLink(const Complex<Real> *buf, int64_t face_vol, int64_t slot,
                   int dir, MatrixSun<Real, NCOLORS> &U) {
-  if (buf == nullptr) {
-    U = MatrixSun<Real, NCOLORS>::zero();
-    return;
-  }
-  const int64_t me = static_cast<int64_t>(NCOLORS * NCOLORS);
-  const int64_t off = (static_cast<int64_t>(dir) * face_vol + slot) * me;
-  for (int i = 0; i < NCOLORS; ++i) {
-    for (int j = 0; j < NCOLORS; ++j) {
-      U.e[i][j] = buf[off + j + i * NCOLORS];
-    }
-  }
+  loadGaugeLinkRef(gaugeLinkRefGhost(buf, face_vol, slot, dir), false, U);
 }
 
 KOKKOS_INLINE_FUNCTION void eo_to_coords(int64_t id, int oddbit, int x[NDIMS],
@@ -186,19 +230,19 @@ KOKKOS_INLINE_FUNCTION void eo_to_coords(int64_t id, int oddbit, int x[NDIMS],
 }
 
 /**
- * @brief Load link U_dir at integer site coords.
+ * @brief Resolve link U_dir at integer site coords to a \ref GaugeLinkRef.
  *
  * Serial (!p.mpi): periodic wrap.
  * MPI: dimensions with \c proc_grid[d]==1 wrap locally; only true subdomain
- * boundaries use \p halo (must be exchanged first).
+ * boundaries use \p halo (must be exchanged first). Missing halo / block
+ * resolves to the zero matrix.
  */
 template <typename Real>
-KOKKOS_INLINE_FUNCTION void
-loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
-                      const GaugeHaloDevice<Real> *halo, const int x[NDIMS],
-                      int dir, const LatticeParams &p,
-                      MatrixSun<Real, NCOLORS> &U,
-                      ArrayType atype = ArrayType::SOA) {
+KOKKOS_INLINE_FUNCTION GaugeLinkRef<Real>
+resolveGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
+                         const GaugeHaloDevice<Real> *halo, const int x[NDIMS],
+                         int dir, const LatticeParams &p,
+                         ArrayType atype = ArrayType::SOA) {
   int off[NDIMS];
   int xw[NDIMS];
   bool need_halo = false;
@@ -231,26 +275,35 @@ loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
 
   if (!need_halo) {
     const int64_t idx_eo = coords_to_eo_idx(xw, p);
-    loadGaugeLinkSoa(gaugePtr, idx_eo, dir, soa_stride, p, U, atype);
-    return;
+    return gaugeLinkRefSoa(gaugePtr, idx_eo, dir, soa_stride, p, atype);
   }
 
   if (halo == nullptr) {
-    U = MatrixSun<Real, NCOLORS>::zero();
-    return;
+    return GaugeLinkRef<Real>{}; // zero matrix
   }
 
   const int code = halo_offset_to_code(off);
   const Complex<Real> *buf = halo->recv[code];
   if (buf == nullptr) {
-    U = MatrixSun<Real, NCOLORS>::zero();
-    return;
+    return GaugeLinkRef<Real>{}; // zero matrix
   }
 
   const int64_t vol = halo->vol[code];
-  const int64_t slot =
-      halo_region_slot(off, xw, halo->split_dim[code], vol, p);
-  loadGhostFaceLink(buf, vol, slot, dir, U);
+  const int64_t slot = halo_region_slot(off, xw, halo->split_dim[code], vol, p);
+  return gaugeLinkRefGhost(buf, vol, slot, dir);
+}
+
+/// \ref resolveGaugeLinkAtCoords followed by one copy into \p U.
+template <typename Real>
+KOKKOS_INLINE_FUNCTION void
+loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
+                      const GaugeHaloDevice<Real> *halo, const int x[NDIMS],
+                      int dir, const LatticeParams &p,
+                      MatrixSun<Real, NCOLORS> &U,
+                      ArrayType atype = ArrayType::SOA) {
+  loadGaugeLinkRef(
+      resolveGaugeLinkAtCoords(gaugePtr, soa_stride, halo, x, dir, p, atype),
+      false, U);
 }
 
 } // namespace kwqft
