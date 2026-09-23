@@ -33,10 +33,6 @@ If the server cannot access GitHub, you need to download the Kokkos source code 
 git clone https://github.com/kokkos/kokkos.git
 cd kokkos && git checkout 5.2.1
 
-# Optional: Download KokkosKernels
-git clone https://github.com/kokkos/kokkos-kernels.git
-cd kokkos-kernels && git checkout 5.2.1
-
 # Then copy the directories to the target server
 ```
 
@@ -110,7 +106,6 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 | Option | Description | Default |
 |--------|-------------|---------|
 | `KOKKOS_SOURCE_DIR` | Local Kokkos source directory | Empty (downloads from GitHub) |
-| `KOKKOS_KERNELS_SOURCE_DIR` | Local KokkosKernels source directory (optional) | Empty |
 | `KWQFT_ENABLE_OPENMP` | Enable OpenMP backend | OFF |
 | `KWQFT_ENABLE_CUDA` | Enable CUDA backend | OFF |
 | `KWQFT_ENABLE_HIP` | Enable HIP backend | OFF |

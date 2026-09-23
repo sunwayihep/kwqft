@@ -33,20 +33,13 @@ public:
   KOKKOS_INLINE_FUNCTION
   Complex(Real re, Real im) : x(re), y(im) {}
 
-  KOKKOS_INLINE_FUNCTION
-  Complex(const Complex &other) : x(other.x), y(other.y) {}
-
   // Convert from Kokkos::complex if needed
   KOKKOS_INLINE_FUNCTION
   Complex(const Kokkos::complex<Real> &kc) : x(kc.real()), y(kc.imag()) {}
 
-  // Assignment operators
-  KOKKOS_INLINE_FUNCTION
-  Complex &operator=(const Complex &other) {
-    x = other.x;
-    y = other.y;
-    return *this;
-  }
+  // Copy is implicit so the type stays trivially copyable. That lets Kokkos
+  // views and the compiler's SIMD passes (AVX-512, NEON, SVE) treat an
+  // element as two packed reals.
 
   KOKKOS_INLINE_FUNCTION
   Complex &operator=(Real re) {

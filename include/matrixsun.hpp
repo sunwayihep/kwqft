@@ -15,6 +15,110 @@
 
 namespace kwqft {
 
+// Host, Nc >= 4: unroll the j and k loops. The hint applies to the next loop:
+//   GCC 8+   #pragma GCC unroll 32
+//   Clang    #pragma unroll 32
+
+// Device keeps the plain loop. 
+// Nc < 4 stays the plain loop on the host too.
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__) &&             \
+    !defined(__SYCL_DEVICE_ONLY__)
+#if defined(__CUDACC__) || defined(__clang__)
+#define KWQFT_UNROLL _Pragma("unroll 32")
+#elif defined(__GNUC__)
+#define KWQFT_UNROLL _Pragma("GCC unroll 32")
+#else
+#define KWQFT_UNROLL
+#endif
+#endif
+
+template <bool HermA, bool HermB, typename Real, int Nc>
+KOKKOS_INLINE_FUNCTION void
+gemm_ijk(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
+         Complex<Real> (&C)[Nc][Nc]) {
+  for (int i = 0; i < Nc; ++i) {
+    for (int j = 0; j < Nc; ++j) {
+      Complex<Real> s;
+      if constexpr (HermA && HermB) {
+        s = ~A[0][i] * ~B[j][0];
+      } else if constexpr (HermA) {
+        s = ~A[0][i] * B[0][j];
+      } else if constexpr (HermB) {
+        s = A[i][0] * ~B[j][0];
+      } else {
+        s = A[i][0] * B[0][j];
+      }
+      for (int k = 1; k < Nc; ++k) {
+        if constexpr (HermA && HermB) {
+          s += ~A[k][i] * ~B[j][k];
+        } else if constexpr (HermA) {
+          s += ~A[k][i] * B[k][j];
+        } else if constexpr (HermB) {
+          s += A[i][k] * ~B[j][k];
+        } else {
+          s += A[i][k] * B[k][j];
+        }
+      }
+      C[i][j] = s;
+    }
+  }
+}
+
+#ifdef KWQFT_UNROLL
+template <bool HermA, bool HermB, typename Real, int Nc>
+KOKKOS_INLINE_FUNCTION void
+gemm_ijk_unroll(const Complex<Real> (&A)[Nc][Nc],
+                const Complex<Real> (&B)[Nc][Nc], Complex<Real> (&C)[Nc][Nc]) {
+  for (int i = 0; i < Nc; ++i) {
+    KWQFT_UNROLL
+    for (int j = 0; j < Nc; ++j) {
+      Complex<Real> s;
+      if constexpr (HermA && HermB) {
+        s = ~A[0][i] * ~B[j][0];
+      } else if constexpr (HermA) {
+        s = ~A[0][i] * B[0][j];
+      } else if constexpr (HermB) {
+        s = A[i][0] * ~B[j][0];
+      } else {
+        s = A[i][0] * B[0][j];
+      }
+      KWQFT_UNROLL
+      for (int k = 1; k < Nc; ++k) {
+        if constexpr (HermA && HermB) {
+          s += ~A[k][i] * ~B[j][k];
+        } else if constexpr (HermA) {
+          s += ~A[k][i] * B[k][j];
+        } else if constexpr (HermB) {
+          s += A[i][k] * ~B[j][k];
+        } else {
+          s += A[i][k] * B[k][j];
+        }
+      }
+      C[i][j] = s;
+    }
+  }
+}
+#endif
+
+/// C = op(A) * op(B). HermX selects conjugate-transpose.
+/// Device uses the plain loop. Host unrolls when Nc >= 4.
+template <bool HermA, bool HermB, typename Real, int Nc>
+KOKKOS_INLINE_FUNCTION void
+sun_gemm(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
+         Complex<Real> (&C)[Nc][Nc]) {
+#ifdef KWQFT_UNROLL
+  if constexpr (Nc >= 4) {
+    gemm_ijk_unroll<HermA, HermB>(A, B, C);
+  } else {
+    gemm_ijk<HermA, HermB>(A, B, C);
+  }
+#else
+  gemm_ijk<HermA, HermB>(A, B, C);
+#endif
+}
+
+#undef KWQFT_UNROLL
+
 /**
  * @brief SU(N) matrix class
  * @tparam Real The underlying real type (float or double)
@@ -24,19 +128,10 @@ template <typename Real, int Nc = NCOLORS> class MatrixSun {
 public:
   Complex<Real> e[Nc][Nc]; // Matrix elements
 
-  // Default constructor (uninitialized for performance)
+  // Default constructor (uninitialized for performance). Copy is implicit so
+  // the Nc x Nc block stays trivially copyable.
   KOKKOS_INLINE_FUNCTION
   MatrixSun() {}
-
-  // Copy constructor
-  KOKKOS_INLINE_FUNCTION
-  MatrixSun(const MatrixSun &other) {
-    for (int i = 0; i < Nc; ++i) {
-      for (int j = 0; j < Nc; ++j) {
-        e[i][j] = other.e[i][j];
-      }
-    }
-  }
 
   // Element access
   KOKKOS_INLINE_FUNCTION
@@ -44,17 +139,6 @@ public:
 
   KOKKOS_INLINE_FUNCTION
   Complex<Real> operator()(int i, int j) const { return e[i][j]; }
-
-  // Assignment
-  KOKKOS_INLINE_FUNCTION
-  MatrixSun &operator=(const MatrixSun &other) {
-    for (int i = 0; i < Nc; ++i) {
-      for (int j = 0; j < Nc; ++j) {
-        e[i][j] = other.e[i][j];
-      }
-    }
-    return *this;
-  }
 
   //=========================================================================
   // Addition operations
@@ -124,14 +208,7 @@ public:
   KOKKOS_INLINE_FUNCTION
   MatrixSun operator*(const MatrixSun &A) const {
     MatrixSun res;
-    for (int i = 0; i < Nc; ++i) {
-      for (int j = 0; j < Nc; ++j) {
-        res.e[i][j] = e[i][0] * A.e[0][j];
-        for (int k = 1; k < Nc; ++k) {
-          res.e[i][j] += e[i][k] * A.e[k][j];
-        }
-      }
-    }
+    sun_gemm<false, false>(e, A.e, res.e);
     return res;
   }
 
@@ -379,14 +456,7 @@ template <typename Real, int Nc>
 KOKKOS_INLINE_FUNCTION MatrixSun<Real, Nc>
 UDaggerU(const MatrixSun<Real, Nc> &A, const MatrixSun<Real, Nc> &B) {
   MatrixSun<Real, Nc> C;
-  for (int i = 0; i < Nc; ++i) {
-    for (int j = 0; j < Nc; ++j) {
-      C.e[i][j] = ~A.e[0][i] * B.e[0][j];
-      for (int k = 1; k < Nc; ++k) {
-        C.e[i][j] += ~A.e[k][i] * B.e[k][j];
-      }
-    }
-  }
+  sun_gemm<true, false>(A.e, B.e, C.e);
   return C;
 }
 
@@ -397,14 +467,7 @@ template <typename Real, int Nc>
 KOKKOS_INLINE_FUNCTION MatrixSun<Real, Nc>
 UUDagger(const MatrixSun<Real, Nc> &A, const MatrixSun<Real, Nc> &B) {
   MatrixSun<Real, Nc> C;
-  for (int i = 0; i < Nc; ++i) {
-    for (int j = 0; j < Nc; ++j) {
-      C.e[i][j] = A.e[i][0] * ~B.e[j][0];
-      for (int k = 1; k < Nc; ++k) {
-        C.e[i][j] += A.e[i][k] * ~B.e[j][k];
-      }
-    }
-  }
+  sun_gemm<false, true>(A.e, B.e, C.e);
   return C;
 }
 

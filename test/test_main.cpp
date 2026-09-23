@@ -218,6 +218,100 @@ template <typename Real> bool test_matrix() {
     }
   }
 
+  // Non-trivial products. A*I only touches the k=0 term of a general GEMM.
+  Matrix Bm;
+  for (int i = 0; i < NCOLORS; ++i) {
+    for (int j = 0; j < NCOLORS; ++j) {
+      Bm.e[i][j] = Complex<Real>(Real(0.1) * (i + 2 * j + 1),
+                                 Real(0.05) * (i - j));
+    }
+  }
+  auto max_abs = [](const Matrix &X, const Matrix &Y) {
+    Real m = Real(0);
+    for (int i = 0; i < NCOLORS; ++i) {
+      for (int j = 0; j < NCOLORS; ++j) {
+        const Real dr = std::abs(X.e[i][j].real() - Y.e[i][j].real());
+        const Real di = std::abs(X.e[i][j].imag() - Y.e[i][j].imag());
+        if (dr > m) {
+          m = dr;
+        }
+        if (di > m) {
+          m = di;
+        }
+      }
+    }
+    return m;
+  };
+  Matrix ref;
+  for (int i = 0; i < NCOLORS; ++i) {
+    for (int j = 0; j < NCOLORS; ++j) {
+      Complex<Real> s = Complex<Real>::zero();
+      for (int k = 0; k < NCOLORS; ++k) {
+        s += A.e[i][k] * Bm.e[k][j];
+      }
+      ref.e[i][j] = s;
+    }
+  }
+  if (max_abs(A * Bm, ref) > Real(1e-9)) {
+    printf("  FAILED: A*B\n");
+    return false;
+  }
+
+  Matrix ref_ud;
+  for (int i = 0; i < NCOLORS; ++i) {
+    for (int j = 0; j < NCOLORS; ++j) {
+      Complex<Real> s = Complex<Real>::zero();
+      for (int k = 0; k < NCOLORS; ++k) {
+        s += A.e[i][k] * ~Bm.e[j][k];
+      }
+      ref_ud.e[i][j] = s;
+    }
+  }
+  if (max_abs(UUDagger(A, Bm), ref_ud) > Real(1e-9)) {
+    printf("  FAILED: A*B^H\n");
+    return false;
+  }
+
+  Matrix ref_du;
+  for (int i = 0; i < NCOLORS; ++i) {
+    for (int j = 0; j < NCOLORS; ++j) {
+      Complex<Real> s = Complex<Real>::zero();
+      for (int k = 0; k < NCOLORS; ++k) {
+        s += ~A.e[k][i] * Bm.e[k][j];
+      }
+      ref_du.e[i][j] = s;
+    }
+  }
+  if (max_abs(UDaggerU(A, Bm), ref_du) > Real(1e-9)) {
+    printf("  FAILED: A^H*B\n");
+    return false;
+  }
+
+  // Same products inside a Kokkos kernel (device lambda on GPU builds).
+  Real kernel_err = Real(0);
+  Kokkos::parallel_reduce(
+      "test_sun_gemm", 1,
+      KOKKOS_LAMBDA(const int, Real &err) {
+        const Matrix C = A * Bm;
+        const Matrix UD = UUDagger(A, Bm);
+        const Matrix DU = UDaggerU(A, Bm);
+        for (int i = 0; i < NCOLORS; ++i) {
+          for (int j = 0; j < NCOLORS; ++j) {
+            err += Kokkos::abs(C.e[i][j].real() - ref.e[i][j].real());
+            err += Kokkos::abs(C.e[i][j].imag() - ref.e[i][j].imag());
+            err += Kokkos::abs(UD.e[i][j].real() - ref_ud.e[i][j].real());
+            err += Kokkos::abs(UD.e[i][j].imag() - ref_ud.e[i][j].imag());
+            err += Kokkos::abs(DU.e[i][j].real() - ref_du.e[i][j].real());
+            err += Kokkos::abs(DU.e[i][j].imag() - ref_du.e[i][j].imag());
+          }
+        }
+      },
+      kernel_err);
+  if (kernel_err > Real(1e-8)) {
+    printf("  FAILED: kernel gemm (err=%g)\n", static_cast<double>(kernel_err));
+    return false;
+  }
+
   printf("  PASSED\n");
   return true;
 }

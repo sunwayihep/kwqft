@@ -48,7 +48,6 @@ set(KWQFT_MIN_BLOCKS_PER_SM "0" CACHE STRING
 
 # Local Kokkos source directory (use this if you cannot access GitHub)
 set(KOKKOS_SOURCE_DIR "" CACHE PATH "Path to local Kokkos source directory")
-set(KOKKOS_KERNELS_SOURCE_DIR "" CACHE PATH "Path to local KokkosKernels source directory (optional)")
 
 # Kokkos configuration - must be set before adding Kokkos
 if(KWQFT_ENABLE_CUDA)
@@ -113,25 +112,6 @@ else()
     FetchContent_MakeAvailable(kokkos)
 endif()
 
-#=============================================================================
-# Find or build KokkosKernels (optional)
-#=============================================================================
-find_package(KokkosKernels QUIET)
-
-if(KokkosKernels_FOUND)
-    message(STATUS "Found installed KokkosKernels: ${KokkosKernels_DIR}")
-    set(HAVE_KOKKOS_KERNELS TRUE)
-elseif(KOKKOS_KERNELS_SOURCE_DIR AND EXISTS "${KOKKOS_KERNELS_SOURCE_DIR}/CMakeLists.txt")
-    # Use local KokkosKernels source directory
-    message(STATUS "Using local KokkosKernels source: ${KOKKOS_KERNELS_SOURCE_DIR}")
-    add_subdirectory(${KOKKOS_KERNELS_SOURCE_DIR} ${CMAKE_BINARY_DIR}/kokkos-kernels)
-    set(HAVE_KOKKOS_KERNELS TRUE)
-else()
-    # KokkosKernels is optional - Kokkos itself has random number support
-    message(STATUS "KokkosKernels not found (optional, Kokkos has built-in RNG support)")
-    set(HAVE_KOKKOS_KERNELS FALSE)
-endif()
-
 # Add compile definitions
 add_compile_definitions(NCOLORS=${KWQFT_NCOLORS})
 add_compile_definitions(NDIMS=${KWQFT_NDIMS})
@@ -168,13 +148,6 @@ if(KWQFT_USE_MPI)
     endif()
 endif()
 
-# Link KokkosKernels if available
-if(HAVE_KOKKOS_KERNELS AND TARGET Kokkos::kokkoskernels)
-    target_link_libraries(kwqft PUBLIC Kokkos::kokkoskernels)
-    target_compile_definitions(kwqft PUBLIC KWQFT_USE_KOKKOS_KERNELS)
-    message(STATUS "Linking with KokkosKernels")
-endif()
-
 # Main executable
 add_executable(heatbath main/heatbath_main.cpp)
 target_link_libraries(heatbath kwqft)
@@ -206,13 +179,10 @@ message(STATUS "  MPI device-aware buffers: ${KWQFT_MPI_DEVICE_AWARE}")
 if(KOKKOS_SOURCE_DIR)
     message(STATUS "  Kokkos source: ${KOKKOS_SOURCE_DIR}")
 endif()
-if(KOKKOS_KERNELS_SOURCE_DIR)
-    message(STATUS "  KokkosKernels source: ${KOKKOS_KERNELS_SOURCE_DIR}")
-endif()
 message(STATUS "===========================================")
 message(STATUS "")
 message(STATUS "Usage hints for offline build:")
 message(STATUS "  -DKOKKOS_SOURCE_DIR=/path/to/kokkos")
-message(STATUS "  -DKOKKOS_KERNELS_SOURCE_DIR=/path/to/kokkos-kernels (optional)")
+message(STATUS "  CPU SIMD: -DKokkos_ARCH_NATIVE=ON (or SKX / ARMV8* etc. enabled in Kokkos)")
 message(STATUS "")
 
