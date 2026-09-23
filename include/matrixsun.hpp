@@ -15,23 +15,6 @@
 
 namespace kwqft {
 
-// Host, Nc >= 4: unroll the j and k loops. The hint applies to the next loop:
-//   GCC 8+   #pragma GCC unroll 32
-//   Clang    #pragma unroll 32
-
-// Device keeps the plain loop. 
-// Nc < 4 stays the plain loop on the host too.
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__) &&             \
-    !defined(__SYCL_DEVICE_ONLY__)
-#if defined(__CUDACC__) || defined(__clang__)
-#define KWQFT_UNROLL _Pragma("unroll 32")
-#elif defined(__GNUC__)
-#define KWQFT_UNROLL _Pragma("GCC unroll 32")
-#else
-#define KWQFT_UNROLL
-#endif
-#endif
-
 template <bool HermA, bool HermB, typename Real, int Nc>
 KOKKOS_INLINE_FUNCTION void
 gemm_ijk(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
@@ -64,60 +47,13 @@ gemm_ijk(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
   }
 }
 
-#ifdef KWQFT_UNROLL
-template <bool HermA, bool HermB, typename Real, int Nc>
-KOKKOS_INLINE_FUNCTION void
-gemm_ijk_unroll(const Complex<Real> (&A)[Nc][Nc],
-                const Complex<Real> (&B)[Nc][Nc], Complex<Real> (&C)[Nc][Nc]) {
-  for (int i = 0; i < Nc; ++i) {
-    KWQFT_UNROLL
-    for (int j = 0; j < Nc; ++j) {
-      Complex<Real> s;
-      if constexpr (HermA && HermB) {
-        s = ~A[0][i] * ~B[j][0];
-      } else if constexpr (HermA) {
-        s = ~A[0][i] * B[0][j];
-      } else if constexpr (HermB) {
-        s = A[i][0] * ~B[j][0];
-      } else {
-        s = A[i][0] * B[0][j];
-      }
-      KWQFT_UNROLL
-      for (int k = 1; k < Nc; ++k) {
-        if constexpr (HermA && HermB) {
-          s += ~A[k][i] * ~B[j][k];
-        } else if constexpr (HermA) {
-          s += ~A[k][i] * B[k][j];
-        } else if constexpr (HermB) {
-          s += A[i][k] * ~B[j][k];
-        } else {
-          s += A[i][k] * B[k][j];
-        }
-      }
-      C[i][j] = s;
-    }
-  }
-}
-#endif
-
 /// C = op(A) * op(B). HermX selects conjugate-transpose.
-/// Device uses the plain loop. Host unrolls when Nc >= 4.
 template <bool HermA, bool HermB, typename Real, int Nc>
 KOKKOS_INLINE_FUNCTION void
 sun_gemm(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
          Complex<Real> (&C)[Nc][Nc]) {
-#ifdef KWQFT_UNROLL
-  if constexpr (Nc >= 4) {
-    gemm_ijk_unroll<HermA, HermB>(A, B, C);
-  } else {
-    gemm_ijk<HermA, HermB>(A, B, C);
-  }
-#else
   gemm_ijk<HermA, HermB>(A, B, C);
-#endif
 }
-
-#undef KWQFT_UNROLL
 
 /**
  * @brief SU(N) matrix class

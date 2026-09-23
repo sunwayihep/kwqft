@@ -84,6 +84,15 @@ Common NVIDIA GPU examples (not exhaustive):
 
 If you enable `KWQFT_ENABLE_CUDA=ON` but do not set any `Kokkos_ARCH_*` option, KWQFT’s CMake defaults to `Kokkos_ARCH_AMPERE80`; override using the guide above.
 
+### CPU SIMD
+
+OpenMP builds batch independent lattice sites with
+`Kokkos::Experimental::simd` for all supported Nc. The gauge field remains in the same
+element-major SOA layout; AVX2, AVX-512, NEON, or SVE is selected by the
+Kokkos architecture option. Use `-DKokkos_ARCH_NATIVE=ON` when building on the
+target CPU. The CUDA, HIP, and SYCL kernels keep their scalar-per-site path.
+Set `-DKWQFT_ENABLE_HOST_SIMD=OFF` to build a scalar CPU comparison.
+
 ### AMD GPU Version (HIP)
 
 ```bash
@@ -107,6 +116,7 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 |--------|-------------|---------|
 | `KOKKOS_SOURCE_DIR` | Local Kokkos source directory | Empty (downloads from GitHub) |
 | `KWQFT_ENABLE_OPENMP` | Enable OpenMP backend | OFF |
+| `KWQFT_ENABLE_HOST_SIMD` | Batch sites with Kokkos SIMD in OpenMP builds | ON |
 | `KWQFT_ENABLE_CUDA` | Enable CUDA backend | OFF |
 | `KWQFT_ENABLE_HIP` | Enable HIP backend | OFF |
 | `KWQFT_ENABLE_SYCL` | Enable SYCL backend | OFF |

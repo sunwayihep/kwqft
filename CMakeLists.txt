@@ -21,6 +21,8 @@ option(KWQFT_ENABLE_OPENMP "Enable OpenMP backend" OFF)
 option(KWQFT_ENABLE_CUDA "Enable CUDA backend" OFF)
 option(KWQFT_ENABLE_HIP "Enable HIP backend" OFF)
 option(KWQFT_ENABLE_SYCL "Enable SYCL backend" OFF)
+option(KWQFT_ENABLE_HOST_SIMD
+  "Batch lattice sites with Kokkos SIMD on OpenMP host builds" ON)
 option(KWQFT_USE_MPI "MPI parallel build (link MPI if ON)" OFF)
 option(KWQFT_MPI_DEVICE_AWARE
   "Pass Kokkos DefaultMemSpace pointers to MPI (needs device-aware MPI on GPU/accelerator builds; no-op benefit on host)"
@@ -117,6 +119,9 @@ add_compile_definitions(NCOLORS=${KWQFT_NCOLORS})
 add_compile_definitions(NDIMS=${KWQFT_NDIMS})
 add_compile_definitions(KWQFT_MAX_THREADS_PER_BLOCK=${KWQFT_MAX_THREADS_PER_BLOCK})
 add_compile_definitions(KWQFT_MIN_BLOCKS_PER_SM=${KWQFT_MIN_BLOCKS_PER_SM})
+if(KWQFT_ENABLE_OPENMP AND KWQFT_ENABLE_HOST_SIMD)
+    add_compile_definitions(KWQFT_ENABLE_HOST_SIMD=1)
+endif()
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -171,6 +176,7 @@ message(STATUS "  NCOLORS: ${KWQFT_NCOLORS}")
 message(STATUS "  NDIMS: ${KWQFT_NDIMS}")
 message(STATUS "  LaunchBounds: MAX_THREADS_PER_BLOCK=${KWQFT_MAX_THREADS_PER_BLOCK} MIN_BLOCKS_PER_SM=${KWQFT_MIN_BLOCKS_PER_SM} (0 = backend default)")
 message(STATUS "  OpenMP: ${KWQFT_ENABLE_OPENMP}")
+message(STATUS "  OpenMP site SIMD: ${KWQFT_ENABLE_HOST_SIMD}")
 message(STATUS "  CUDA: ${KWQFT_ENABLE_CUDA}")
 message(STATUS "  HIP: ${KWQFT_ENABLE_HIP}")
 message(STATUS "  SYCL: ${KWQFT_ENABLE_SYCL}")

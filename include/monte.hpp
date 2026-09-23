@@ -261,6 +261,48 @@ void launchHeatBathSweep(const char *label, int64_t n, const SiteList &list,
                          int parity, int mu, const LatticeParams &params,
                          ArrayType atype, double betaOverNc,
                          const PoolType &pool) {
+#if defined(KOKKOS_ENABLE_OPENMP) && defined(KWQFT_ENABLE_HOST_SIMD)
+  using Simd = Kokkos::Experimental::simd<Real>;
+  if constexpr (NCOLORS >= 2 && Simd::size() > 1) {
+    constexpr int width = static_cast<int>(Simd::size());
+    const int64_t batches = n / width;
+    Kokkos::parallel_for(
+        label, range_policy(0, batches), KOKKOS_LAMBDA(const int64_t batch) {
+          int64_t id[width];
+          const int64_t begin = batch * width;
+          for (int lane = 0; lane < width; ++lane) {
+            const int64_t i = begin + lane;
+            id[lane] = has_list ? list(i) : i;
+          }
+          const auto staple_v = calculateStapleLazyBatch<Real, Simd>(
+              gaugePtr, size, use_halo ? &halo_dev : nullptr, id, parity, mu,
+              params, atype);
+          for (int lane = 0; lane < width; ++lane) {
+            MatrixSun<Real, NCOLORS> staple;
+            extractMatrixLane<Real>(staple_v, lane, staple);
+            auto gen = pool.get_state(static_cast<uint64_t>(id[lane]));
+            const int64_t idxoddbit =
+                id[lane] + parity * params.half_volume;
+            const int64_t link_base = idxoddbit + mu * params.volume;
+            MatrixSun<Real, NCOLORS> U;
+            loadGaugeMatrix(gaugePtr, link_base, size, atype, U);
+            heatBathSun<Real>(U, staple.dagger(), betaOverNc, gen);
+            storeGaugeMatrix(gaugePtr, link_base, size, atype, U);
+            pool.free_state(gen);
+          }
+        });
+
+    const int64_t tail = batches * width;
+    Kokkos::parallel_for(
+        label, range_policy(tail, n), KOKKOS_LAMBDA(const int64_t i) {
+          const int64_t id = has_list ? list(i) : i;
+          heatBathUpdateSite<Real>(
+              gaugePtr, size, use_halo ? &halo_dev : nullptr, id, parity, mu,
+              params, atype, betaOverNc, pool);
+        });
+    return;
+  }
+#endif
   Kokkos::parallel_for(
       label, range_policy(0, n), KOKKOS_LAMBDA(const int64_t i) {
         const int64_t id = has_list ? list(i) : i;
@@ -276,6 +318,46 @@ void launchOverrelaxSweep(const char *label, int64_t n, const SiteList &list,
                           const GaugeHaloDevice<Real> &halo_dev, bool use_halo,
                           int parity, int mu, const LatticeParams &params,
                           ArrayType atype) {
+#if defined(KOKKOS_ENABLE_OPENMP) && defined(KWQFT_ENABLE_HOST_SIMD)
+  using Simd = Kokkos::Experimental::simd<Real>;
+  if constexpr (NCOLORS >= 2 && Simd::size() > 1) {
+    constexpr int width = static_cast<int>(Simd::size());
+    const int64_t batches = n / width;
+    Kokkos::parallel_for(
+        label, range_policy(0, batches), KOKKOS_LAMBDA(const int64_t batch) {
+          int64_t id[width];
+          const int64_t begin = batch * width;
+          for (int lane = 0; lane < width; ++lane) {
+            const int64_t i = begin + lane;
+            id[lane] = has_list ? list(i) : i;
+          }
+          const auto staple_v = calculateStapleLazyBatch<Real, Simd>(
+              gaugePtr, size, use_halo ? &halo_dev : nullptr, id, parity, mu,
+              params, atype);
+          for (int lane = 0; lane < width; ++lane) {
+            MatrixSun<Real, NCOLORS> staple;
+            extractMatrixLane<Real>(staple_v, lane, staple);
+            const int64_t idxoddbit =
+                id[lane] + parity * params.half_volume;
+            const int64_t link_base = idxoddbit + mu * params.volume;
+            MatrixSun<Real, NCOLORS> U;
+            loadGaugeMatrix(gaugePtr, link_base, size, atype, U);
+            overrelaxationSun<Real>(U, staple.dagger());
+            storeGaugeMatrix(gaugePtr, link_base, size, atype, U);
+          }
+        });
+
+    const int64_t tail = batches * width;
+    Kokkos::parallel_for(
+        label, range_policy(tail, n), KOKKOS_LAMBDA(const int64_t i) {
+          const int64_t id = has_list ? list(i) : i;
+          overrelaxUpdateSite<Real>(
+              gaugePtr, size, use_halo ? &halo_dev : nullptr, id, parity, mu,
+              params, atype);
+        });
+    return;
+  }
+#endif
   Kokkos::parallel_for(
       label, range_policy(0, n), KOKKOS_LAMBDA(const int64_t i) {
         const int64_t id = has_list ? list(i) : i;

@@ -58,6 +58,7 @@ public:
   KOKKOS_INLINE_FUNCTION int64_t stride() const { return stride_; }
   KOKKOS_INLINE_FUNCTION int link_dir() const { return link_dir_; }
   KOKKOS_INLINE_FUNCTION ArrayType array_type() const { return atype_; }
+  KOKKOS_INLINE_FUNCTION bool adjoint() const { return adjoint_; }
 
   KOKKOS_INLINE_FUNCTION
   LatticeColorMatrix with_shift(ShiftDirection dir, int mu) const {
