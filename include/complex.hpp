@@ -33,9 +33,12 @@ public:
   KOKKOS_INLINE_FUNCTION
   Complex(Real re, Real im) : x(re), y(im) {}
 
-  // Convert from Kokkos::complex if needed
-  KOKKOS_INLINE_FUNCTION
-  Complex(const Kokkos::complex<Real> &kc) : x(kc.real()), y(kc.imag()) {}
+  // Convert from Kokkos::complex only when Real is a scalar float. This
+  // constructor is a template so Complex<simd<T>> does not instantiate
+  // Kokkos::complex<simd<T>>, which Kokkos forbids.
+  template <typename R>
+  KOKKOS_INLINE_FUNCTION Complex(const Kokkos::complex<R> &kc)
+      : x(kc.real()), y(kc.imag()) {}
 
   // Copy is implicit so the type stays trivially copyable. That lets Kokkos
   // views and the compiler's SIMD passes (AVX-512, NEON, SVE) treat an
