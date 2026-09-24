@@ -726,6 +726,14 @@ public:
   }
 };
 
+// Explicit instantiations live in src/monte.cpp. See measurements.hpp.
+extern template class HeatBath<double>;
+extern template class Overrelaxation<double>;
+#ifndef KOKKOS_ENABLE_HIP
+extern template class HeatBath<float>;
+extern template class Overrelaxation<float>;
+#endif
+
 } // namespace kwqft
 
 #endif // KWQFT_MONTE_HPP

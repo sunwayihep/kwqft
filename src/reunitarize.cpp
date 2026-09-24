@@ -7,8 +7,9 @@
 
 namespace kwqft {
 
-// Explicit template instantiations
-template class Reunitarize<float>;
 template class Reunitarize<double>;
+#ifndef KOKKOS_ENABLE_HIP
+template class Reunitarize<float>;
+#endif
 
 } // namespace kwqft

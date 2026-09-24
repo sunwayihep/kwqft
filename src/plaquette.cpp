@@ -7,8 +7,9 @@
 
 namespace kwqft {
 
-// Explicit template instantiations
-template class Plaquette<float>;
 template class Plaquette<double>;
+#ifndef KOKKOS_ENABLE_HIP
+template class Plaquette<float>;
+#endif
 
 } // namespace kwqft

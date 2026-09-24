@@ -338,7 +338,7 @@ public:
               const int64_t idx_eo = coords_to_eo_idx(x, params);
               MatrixT uT;
               loadGaugeLinkSoa(gaugePtr, idx_eo, tDir, size, params, uT, atype);
-              poly = poly * uT;
+              poly *= uT;
             }
             local_poly(spatialIdx) = poly;
           });
@@ -367,9 +367,7 @@ public:
           }
           Kokkos::parallel_for(
               "PolyakovLoop_combine", range_policy(0, spatialVolume),
-              KOKKOS_LAMBDA(const int64_t s) {
-                local_poly(s) = local_poly(s) * recv_poly(s);
-              });
+              KOKKOS_LAMBDA(const int64_t s) { local_poly(s) *= recv_poly(s); });
           Kokkos::fence();
         } else if (rel == stride) {
           const int partner = t_coord - stride;
@@ -386,20 +384,34 @@ public:
 #endif
 
       if (holds_result) {
+        // Single-value reduces only: HIP's CombinedReducer template for
+        // (re, im) is disproportionately expensive to compile at large Nc.
         Kokkos::parallel_reduce(
-            "PolyakovLoop_trace", range_policy(0, spatialVolume),
-            KOKKOS_LAMBDA(const int64_t s, Real &reSum, Real &imSum) {
-              const ComplexT tr = local_poly(s).trace() / Real(NCOLORS);
-              reSum += tr.real();
-              imSum += tr.imag();
+            "PolyakovLoop_trace_re", range_policy(0, spatialVolume),
+            KOKKOS_LAMBDA(const int64_t s, Real &reSum) {
+              reSum += local_poly(s).trace().real();
             },
-            polyRe, polyIm);
+            polyRe);
+        Kokkos::parallel_reduce(
+            "PolyakovLoop_trace_im", range_policy(0, spatialVolume),
+            KOKKOS_LAMBDA(const int64_t s, Real &imSum) {
+              imSum += local_poly(s).trace().imag();
+            },
+            polyIm);
+        polyRe /= Real(NCOLORS);
+        polyIm /= Real(NCOLORS);
       }
     } else {
-      Kokkos::parallel_reduce(
-          "PolyakovLoop",
-          range_policy(0, spatialVolume),
-          KOKKOS_LAMBDA(const int64_t spatialIdx, Real &reSum, Real &imSum) {
+      // Product in a parallel_for (cheaper for HIP to compile than a
+      // CombinedReducer parallel_reduce that also owns the matrices), then
+      // two scalar reductions of the per-site traces.
+      using TraceView = Kokkos::View<ComplexT *, DefaultMemSpace>;
+      TraceView traces(
+          Kokkos::view_alloc("PolyakovLoop_traces", Kokkos::WithoutInitializing),
+          spatialVolume);
+      Kokkos::parallel_for(
+          "PolyakovLoop_product", range_policy(0, spatialVolume),
+          KOKKOS_LAMBDA(const int64_t spatialIdx) {
             ComplexT *gaugePtr = gaugeView.data();
 
             int x[NDIMS];
@@ -416,14 +428,22 @@ public:
               const int64_t idx_eo = coords_to_eo_idx(x, params);
               MatrixT uT;
               loadGaugeLinkSoa(gaugePtr, idx_eo, tDir, size, params, uT, atype);
-              poly = poly * uT;
+              poly *= uT;
             }
-
-            const ComplexT tr = poly.trace() / Real(NCOLORS);
-            reSum += tr.real();
-            imSum += tr.imag();
+            traces(spatialIdx) = poly.trace() / Real(NCOLORS);
+          });
+      Kokkos::parallel_reduce(
+          "PolyakovLoop_re", range_policy(0, spatialVolume),
+          KOKKOS_LAMBDA(const int64_t s, Real &reSum) {
+            reSum += traces(s).real();
           },
-          polyRe, polyIm);
+          polyRe);
+      Kokkos::parallel_reduce(
+          "PolyakovLoop_im", range_policy(0, spatialVolume),
+          KOKKOS_LAMBDA(const int64_t s, Real &imSum) {
+            imSum += traces(s).imag();
+          },
+          polyIm);
     }
 
 #ifdef KWQFT_USE_MPI
@@ -704,6 +724,18 @@ public:
            report.bandwidth_gbs, report.gflops);
   }
 };
+
+// Explicit instantiations live in src/{plaquette,polyakov,reunitarize}.cpp.
+// Without these declarations every TU that calls run() (e.g. heatbath_main)
+// recompiles the device kernels — the dominant HIP compile cost at large Nc.
+extern template class Plaquette<double>;
+extern template class PolyakovLoop<double>;
+extern template class Reunitarize<double>;
+#ifndef KOKKOS_ENABLE_HIP
+extern template class Plaquette<float>;
+extern template class PolyakovLoop<float>;
+extern template class Reunitarize<float>;
+#endif
 
 } // namespace kwqft
 

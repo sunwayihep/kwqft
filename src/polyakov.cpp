@@ -7,8 +7,9 @@
 
 namespace kwqft {
 
-// Explicit template instantiations
-template class PolyakovLoop<float>;
 template class PolyakovLoop<double>;
+#ifndef KOKKOS_ENABLE_HIP
+template class PolyakovLoop<float>;
+#endif
 
 } // namespace kwqft
