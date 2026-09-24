@@ -21,8 +21,6 @@ option(KWQFT_ENABLE_OPENMP "Enable OpenMP backend" OFF)
 option(KWQFT_ENABLE_CUDA "Enable CUDA backend" OFF)
 option(KWQFT_ENABLE_HIP "Enable HIP backend" OFF)
 option(KWQFT_ENABLE_SYCL "Enable SYCL backend" OFF)
-option(KWQFT_ENABLE_HOST_SIMD
-  "Batch lattice sites with Kokkos SIMD on OpenMP host builds" ON)
 option(KWQFT_USE_MPI "MPI parallel build (link MPI if ON)" OFF)
 option(KWQFT_MPI_DEVICE_AWARE
   "Pass Kokkos DefaultMemSpace pointers to MPI (needs device-aware MPI on GPU/accelerator builds; no-op benefit on host)"
@@ -83,10 +81,39 @@ if(KWQFT_ENABLE_SYCL)
     set(Kokkos_ENABLE_SYCL ON CACHE BOOL "")
 endif()
 
+# Host execution space: OpenMP, or Serial when OpenMP is off (MPI-only included).
+# CUDA/HIP/SYCL builds also keep Serial as the host space, but that is not a
+# host-only backend and cannot select site SIMD.
 if(KWQFT_ENABLE_OPENMP)
     set(Kokkos_ENABLE_OPENMP ON CACHE BOOL "")
 else()
     set(Kokkos_ENABLE_SERIAL ON CACHE BOOL "")
+endif()
+
+set(_kwqft_device_backend FALSE)
+if(KWQFT_ENABLE_CUDA OR KWQFT_ENABLE_HIP OR KWQFT_ENABLE_SYCL)
+    set(_kwqft_device_backend TRUE)
+endif()
+
+if(_kwqft_device_backend)
+    # -D on the command line is visible before option(); the default must not
+    # count as "turned on", or every GPU configure would fail.
+    if(DEFINED KWQFT_ENABLE_HOST_SIMD AND KWQFT_ENABLE_HOST_SIMD)
+        message(FATAL_ERROR
+            "KWQFT_ENABLE_HOST_SIMD can only be set for host backends "
+            "(KWQFT_ENABLE_OPENMP, or Serial when OpenMP is off, including MPI-only). "
+            "Do not enable it together with CUDA, HIP, or SYCL.")
+    endif()
+    set(KWQFT_ENABLE_HOST_SIMD OFF CACHE BOOL
+        "Batch lattice sites with Kokkos SIMD (OpenMP or Serial host only)" FORCE)
+else()
+    option(KWQFT_ENABLE_HOST_SIMD
+        "Batch lattice sites with Kokkos SIMD on OpenMP or Serial host builds" ON)
+endif()
+
+set(KWQFT_HOST_SIMD_ACTIVE OFF)
+if(NOT _kwqft_device_backend AND KWQFT_ENABLE_HOST_SIMD)
+    set(KWQFT_HOST_SIMD_ACTIVE ON)
 endif()
 
 #=============================================================================
@@ -119,7 +146,7 @@ add_compile_definitions(NCOLORS=${KWQFT_NCOLORS})
 add_compile_definitions(NDIMS=${KWQFT_NDIMS})
 add_compile_definitions(KWQFT_MAX_THREADS_PER_BLOCK=${KWQFT_MAX_THREADS_PER_BLOCK})
 add_compile_definitions(KWQFT_MIN_BLOCKS_PER_SM=${KWQFT_MIN_BLOCKS_PER_SM})
-if(KWQFT_ENABLE_OPENMP AND KWQFT_ENABLE_HOST_SIMD)
+if(KWQFT_HOST_SIMD_ACTIVE)
     add_compile_definitions(KWQFT_ENABLE_HOST_SIMD=1)
 endif()
 
@@ -176,7 +203,12 @@ message(STATUS "  NCOLORS: ${KWQFT_NCOLORS}")
 message(STATUS "  NDIMS: ${KWQFT_NDIMS}")
 message(STATUS "  LaunchBounds: MAX_THREADS_PER_BLOCK=${KWQFT_MAX_THREADS_PER_BLOCK} MIN_BLOCKS_PER_SM=${KWQFT_MIN_BLOCKS_PER_SM} (0 = backend default)")
 message(STATUS "  OpenMP: ${KWQFT_ENABLE_OPENMP}")
-message(STATUS "  OpenMP site SIMD: ${KWQFT_ENABLE_HOST_SIMD}")
+if(KWQFT_ENABLE_OPENMP)
+    message(STATUS "  Host backend: OpenMP")
+else()
+    message(STATUS "  Host backend: Serial")
+endif()
+message(STATUS "  Host site SIMD: ${KWQFT_HOST_SIMD_ACTIVE}")
 message(STATUS "  CUDA: ${KWQFT_ENABLE_CUDA}")
 message(STATUS "  HIP: ${KWQFT_ENABLE_HIP}")
 message(STATUS "  SYCL: ${KWQFT_ENABLE_SYCL}")

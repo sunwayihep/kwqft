@@ -86,7 +86,7 @@ If you enable `KWQFT_ENABLE_CUDA=ON` but do not set any `Kokkos_ARCH_*` option, 
 
 ### CPU SIMD
 
-OpenMP builds batch independent lattice sites with
+OpenMP and Serial host builds (including MPI without OpenMP) batch independent lattice sites with
 `Kokkos::Experimental::simd` for all supported Nc: staple, link load/store,
 heatbath and overrelaxation run on one SIMD lane per site, and only the SU(2)
 heatbath sampler draws lane by lane from each site's own RNG stream. The gauge
@@ -120,7 +120,7 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 |--------|-------------|---------|
 | `KOKKOS_SOURCE_DIR` | Local Kokkos source directory | Empty (downloads from GitHub) |
 | `KWQFT_ENABLE_OPENMP` | Enable OpenMP backend | OFF |
-| `KWQFT_ENABLE_HOST_SIMD` | Batch sites with Kokkos SIMD in OpenMP builds | ON |
+| `KWQFT_ENABLE_HOST_SIMD` | Batch sites with Kokkos SIMD on OpenMP or Serial host builds. Error if set ON with CUDA, HIP, or SYCL | ON for host, unavailable for device |
 | `KWQFT_ENABLE_CUDA` | Enable CUDA backend | OFF |
 | `KWQFT_ENABLE_HIP` | Enable HIP backend | OFF |
 | `KWQFT_ENABLE_SYCL` | Enable SYCL backend | OFF |

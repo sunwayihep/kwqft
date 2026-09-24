@@ -17,11 +17,12 @@
 #include <cstdio>
 #include <type_traits>
 
-// Cross-site SIMD (one Kokkos SIMD lane per lattice site) is a host-only
-// OpenMP path. Kokkos_SIMD.hpp must be included before the SU(N)/SU(2)
-// templates so that qualified calls such as Kokkos::sqrt and Kokkos::fma see
-// the SIMD overloads.
-#if defined(KOKKOS_ENABLE_OPENMP) && defined(KWQFT_ENABLE_HOST_SIMD) &&         \
+// Cross-site SIMD (one Kokkos SIMD lane per lattice site) is host-only:
+// OpenMP, or Serial (including MPI without OpenMP). Kokkos_SIMD.hpp must be
+// included before the SU(N)/SU(2) templates so that qualified calls such as
+// Kokkos::sqrt and Kokkos::fma see the SIMD overloads.
+#if defined(KWQFT_ENABLE_HOST_SIMD) &&                                         \
+    (defined(KOKKOS_ENABLE_OPENMP) || defined(KOKKOS_ENABLE_SERIAL)) &&        \
     !defined(KOKKOS_ENABLE_CUDA) && !defined(KOKKOS_ENABLE_HIP) &&             \
     !defined(KOKKOS_ENABLE_SYCL)
 #define KWQFT_SITE_SIMD 1
