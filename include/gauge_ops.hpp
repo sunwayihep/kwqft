@@ -32,7 +32,7 @@ constexpr int t_dir() { return NDIMS - 1; }
  * matrix (plus one load buffer).
  */
 template <typename Real>
-KOKKOS_INLINE_FUNCTION MatrixSun<Real, NCOLORS>
+KWQFT_INLINE_FUNCTION MatrixSun<Real, NCOLORS>
 calculateStapleLazy(const Complex<Real> *gaugePtr, int64_t soa_stride,
                     const GaugeHaloDevice<Real> *halo, int64_t id, int oddbit,
                     int mu, const LatticeParams &params,

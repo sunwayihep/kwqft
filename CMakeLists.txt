@@ -159,6 +159,7 @@ set(KWQFT_SOURCES
     src/gauge_array.cpp
     src/random.cpp
     src/monte.cpp
+    src/overrelax.cpp
     src/plaquette.cpp
     src/polyakov.cpp
     src/reunitarize.cpp

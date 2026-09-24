@@ -55,7 +55,7 @@ KOKKOS_INLINE_FUNCTION Msu2<Real> drawHeatBathSu2(Real ap, Generator &gen) {
 }
 
 template <typename Real, typename Generator>
-KOKKOS_INLINE_FUNCTION void heatBathSun(MatrixSun<Real, NCOLORS> &U,
+KWQFT_INLINE_FUNCTION void heatBathSun(MatrixSun<Real, NCOLORS> &U,
                                         const MatrixSun<Real, NCOLORS> &F,
                                         double beta_over_nc, Generator &gen) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
@@ -149,7 +149,7 @@ KOKKOS_INLINE_FUNCTION void heatBathSun(MatrixSun<Real, NCOLORS> &U,
  * @brief Overrelaxation update for SU(N)
  */
 template <typename Real>
-KOKKOS_INLINE_FUNCTION void
+KWQFT_INLINE_FUNCTION void
 overrelaxationSun(MatrixSun<Real, NCOLORS> &U,
                   const MatrixSun<Real, NCOLORS> &F) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
@@ -217,7 +217,7 @@ overrelaxationSun(MatrixSun<Real, NCOLORS> &U,
 //=============================================================================
 
 template <typename Real, typename PoolType>
-KOKKOS_INLINE_FUNCTION void
+KWQFT_INLINE_FUNCTION void
 heatBathUpdateSite(Complex<Real> *gaugePtr, int64_t soa_stride,
                    const GaugeHaloDevice<Real> *halo, int64_t id, int parity,
                    int mu, const LatticeParams &params, ArrayType atype,
@@ -240,7 +240,7 @@ heatBathUpdateSite(Complex<Real> *gaugePtr, int64_t soa_stride,
 }
 
 template <typename Real>
-KOKKOS_INLINE_FUNCTION void
+KWQFT_INLINE_FUNCTION void
 overrelaxUpdateSite(Complex<Real> *gaugePtr, int64_t soa_stride,
                     const GaugeHaloDevice<Real> *halo, int64_t id, int parity,
                     int mu, const LatticeParams &params, ArrayType atype) {

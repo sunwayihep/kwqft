@@ -52,7 +52,7 @@ gemm_ijk_fma(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
 }
 
 template <bool HermA, bool HermB, typename Real, int Nc>
-KOKKOS_INLINE_FUNCTION void
+KWQFT_INLINE_FUNCTION void
 gemm_ijk(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
          Complex<Real> (&C)[Nc][Nc]) {
   for (int i = 0; i < Nc; ++i) {
@@ -85,7 +85,7 @@ gemm_ijk(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
 
 /// C = op(A) * op(B). HermX selects conjugate-transpose.
 template <bool HermA, bool HermB, typename Real, int Nc>
-KOKKOS_INLINE_FUNCTION void
+KWQFT_INLINE_FUNCTION void
 sun_gemm(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
          Complex<Real> (&C)[Nc][Nc]) {
   if constexpr (std::is_floating_point_v<Real>) {
@@ -181,7 +181,7 @@ public:
   //=========================================================================
 
   // Matrix-matrix multiplication
-  KOKKOS_INLINE_FUNCTION
+  KWQFT_INLINE_FUNCTION
   MatrixSun operator*(const MatrixSun &A) const {
     MatrixSun res;
     sun_gemm<false, false>(e, A.e, res.e);
@@ -440,7 +440,7 @@ UDaggerU(const MatrixSun<Real, Nc> &A, const MatrixSun<Real, Nc> &B) {
  * @brief Compute A * B^\dagger
  */
 template <typename Real, int Nc>
-KOKKOS_INLINE_FUNCTION MatrixSun<Real, Nc>
+KWQFT_INLINE_FUNCTION MatrixSun<Real, Nc>
 UUDagger(const MatrixSun<Real, Nc> &A, const MatrixSun<Real, Nc> &B) {
   MatrixSun<Real, Nc> C;
   sun_gemm<false, true>(A.e, B.e, C.e);

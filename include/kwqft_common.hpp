@@ -29,6 +29,15 @@
 #include <Kokkos_SIMD.hpp>
 #endif
 
+// HIP device compilation of one inlined SU(N) kernel (staple plus every
+// N x N product) exhausts memory at large Nc. Keep those
+// functions as real calls on HIP; other backends stay inlined.
+#if defined(KOKKOS_ENABLE_HIP)
+#define KWQFT_INLINE_FUNCTION KOKKOS_FUNCTION __attribute__((noinline))
+#else
+#define KWQFT_INLINE_FUNCTION KOKKOS_INLINE_FUNCTION
+#endif
+
 namespace kwqft {
 
 /// Scalar element type of \p T: T itself, or T::value_type for SIMD packs.
