@@ -485,6 +485,168 @@ template <typename Real> bool test_overrelaxation_trajectory() {
   return true;
 }
 
+#ifdef KWQFT_SITE_SIMD
+/// Max |A - B| over all stored links of two gauge copies.
+template <typename Real>
+double max_link_diff(const Complex<Real> *a, const Complex<Real> *b,
+                     int64_t n) {
+  double d = 0;
+  for (int64_t i = 0; i < n; ++i) {
+    d = std::max(d, static_cast<double>(abs(a[i] - b[i])));
+  }
+  return d;
+}
+
+/**
+ * Cross-site SIMD batches against the scalar per-site path on a thermalized
+ * configuration: staple, overrelaxation and heatbath (same per-site RNG
+ * streams). Site orders cover contiguous lanes (L0/2 multiple of the SIMD
+ * width), batches crossing lattice rows, and a scrambled site list (gathers).
+ */
+template <typename Real>
+bool test_site_simd_vs_scalar_case(const std::vector<int> &lattice,
+                                   ArrayType atype) {
+  using Simd = SiteSimd<Real>;
+  constexpr int W = static_cast<int>(Simd::size());
+  reset_and_initialize_params(lattice, kTestBeta);
+  const LatticeParams params = PARAMS::params;
+  const int64_t half = params.half_volume;
+
+  GaugeArray<Real> gauge(atype, MemoryLocation::Device, params.volume * NDIMS,
+                         true);
+  gauge.initCold();
+  {
+    RandomGenerator rng(4242, half);
+    HeatBath<Real> heatbath(gauge, rng, params);
+    for (int i = 0; i < 3; ++i) {
+      heatbath.run();
+    }
+  }
+  Kokkos::fence();
+  const int64_t stride = gauge.size();
+  const int64_t n = static_cast<int64_t>(gauge_complex_elems(atype)) * stride;
+  const std::vector<Complex<Real>> init(gauge.data(), gauge.data() + n);
+
+  double staple_err = 0, or_err = 0, hb_err = 0;
+  int64_t hb_links = 0, hb_off = 0;
+  for (int order = 0; order < 2; ++order) {
+    std::vector<int64_t> sites(half);
+    for (int64_t i = 0; i < half; ++i) {
+      sites[i] = order == 0 ? i : (i * 37 + 11) % half;
+    }
+    for (int parity = 0; parity < 2; ++parity) {
+      for (int mu = 0; mu < NDIMS; ++mu) {
+        std::vector<Complex<Real>> a(init), b(init);
+        RandomGenerator rng_a(777, half), rng_b(777, half);
+        for (int64_t s = 0; s + W <= half; s += W) {
+          const int64_t *id = &sites[s];
+          const auto sv = calculateStapleLazyBatch<Real, Simd>(
+              init.data(), stride, nullptr, id, parity, mu, params, atype);
+          for (int l = 0; l < W; ++l) {
+            const auto ss = calculateStapleLazy<Real>(
+                init.data(), stride, nullptr, id[l], parity, mu, params, atype);
+            for (int i = 0; i < NCOLORS; ++i) {
+              for (int j = 0; j < NCOLORS; ++j) {
+                const Complex<Real> v(sv.e[i][j].x[l], sv.e[i][j].y[l]);
+                staple_err = std::max(
+                    staple_err, static_cast<double>(abs(v - ss.e[i][j])));
+              }
+            }
+          }
+          overrelaxUpdateBatch<Real, Simd>(a.data(), stride, nullptr, id,
+                                           parity, mu, params, atype);
+          for (int l = 0; l < W; ++l) {
+            overrelaxUpdateSite<Real>(b.data(), stride, nullptr, id[l], parity,
+                                      mu, params, atype);
+          }
+        }
+        or_err = std::max(or_err, max_link_diff(a.data(), b.data(), n));
+
+        a = init;
+        b = init;
+        for (int64_t s = 0; s + W <= half; s += W) {
+          const int64_t *id = &sites[s];
+          heatBathUpdateBatch<Real, Simd>(a.data(), stride, nullptr, id,
+                                          parity, mu, params, atype, 1.5,
+                                          rng_a.getPool());
+          for (int l = 0; l < W; ++l) {
+            heatBathUpdateSite<Real>(b.data(), stride, nullptr, id[l], parity,
+                                     mu, params, atype, 1.5, rng_b.getPool());
+          }
+        }
+        // A rounding-level difference can flip one accept/reject test in the
+        // SU(2) sampler; that link then takes a different (valid) value.
+        const int64_t elems = gauge_complex_elems(atype);
+        for (int64_t k = 0; k < stride; ++k) {
+          double d = 0;
+          for (int64_t e = 0; e < elems; ++e) {
+            d = std::max(d, static_cast<double>(
+                                abs(a[k + e * stride] - b[k + e * stride])));
+          }
+          if (a[k] == init[k] && b[k] == init[k]) {
+            continue;
+          }
+          ++hb_links;
+          if (d > 1e-8) {
+            ++hb_off;
+          } else {
+            hb_err = std::max(hb_err, d);
+          }
+        }
+      }
+    }
+  }
+
+  const bool ok = staple_err < 1e-11 && or_err < 1e-11 && hb_err < 1e-9 &&
+                  hb_off * 1000 <= hb_links;
+  printf("  L=%dx..%s: staple %.1e, OR %.1e, HB %.1e (%lld/%lld links "
+         "flipped) %s\n",
+         lattice[0], atype == ArrayType::SOA12 ? " SOA12" : "", staple_err,
+         or_err, hb_err, static_cast<long long>(hb_off),
+         static_cast<long long>(hb_links), ok ? "ok" : "FAILED");
+  return ok;
+}
+
+/// De-interleaving load/store of W consecutive complexes must be exact.
+template <typename T> bool test_site_simd_contiguous_roundtrip() {
+  using Simd = SiteSimd<T>;
+  constexpr int W = static_cast<int>(Simd::size());
+  Complex<T> in[W], out[W];
+  for (int l = 0; l < W; ++l) {
+    in[l] = Complex<T>(T(l + 1), T(-(l + 1) * 10));
+  }
+  Simd re, im;
+  site_simd_detail::loadContiguous(in, re, im);
+  site_simd_detail::storeContiguous(out, re, im);
+  bool ok = true;
+  for (int l = 0; l < W; ++l) {
+    ok = ok && re[l] == in[l].x && im[l] == in[l].y && out[l] == in[l];
+  }
+  printf("  %s contiguous load/store (width %d): %s\n",
+         std::is_same_v<T, float> ? "float " : "double", W,
+         ok ? "ok" : "FAILED");
+  return ok;
+}
+
+template <typename Real> bool test_site_simd_vs_scalar() {
+  printf("Testing cross-site SIMD vs scalar (width %d)...\n",
+         static_cast<int>(SiteSimd<Real>::size()));
+  bool ok = test_site_simd_contiguous_roundtrip<float>();
+  ok = test_site_simd_contiguous_roundtrip<double>() && ok;
+  std::vector<int> contiguous(NDIMS, 4), row_cross(NDIMS, 4);
+  contiguous[0] = 2 * static_cast<int>(SiteSimd<Real>::size());
+  row_cross[0] = 6;
+  ok = test_site_simd_vs_scalar_case<Real>(contiguous, ArrayType::SOA) && ok;
+  ok = test_site_simd_vs_scalar_case<Real>(row_cross, ArrayType::SOA) && ok;
+  if constexpr (NCOLORS == 3) {
+    ok = test_site_simd_vs_scalar_case<Real>(row_cross, ArrayType::SOA12) &&
+         ok;
+  }
+  printf(ok ? "  PASSED\n" : "  FAILED\n");
+  return ok;
+}
+#endif
+
 #ifdef KWQFT_USE_MPI
 template <typename Real> bool test_mpi_gauge_io_roundtrip() {
   const int nproc = mpi_comm_size();
@@ -785,6 +947,12 @@ int main(int argc, char *argv[]) {
       passed++;
     else
       failed++;
+#ifdef KWQFT_SITE_SIMD
+    if (test_site_simd_vs_scalar<double>())
+      passed++;
+    else
+      failed++;
+#endif
   }
 
 #ifdef KWQFT_USE_MPI

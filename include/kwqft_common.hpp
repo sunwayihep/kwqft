@@ -15,8 +15,30 @@
 #include <Kokkos_Random.hpp>
 #include <cmath>
 #include <cstdio>
+#include <type_traits>
+
+// Cross-site SIMD (one Kokkos SIMD lane per lattice site) is a host-only
+// OpenMP path. Kokkos_SIMD.hpp must be included before the SU(N)/SU(2)
+// templates so that qualified calls such as Kokkos::sqrt and Kokkos::fma see
+// the SIMD overloads.
+#if defined(KOKKOS_ENABLE_OPENMP) && defined(KWQFT_ENABLE_HOST_SIMD) &&         \
+    !defined(KOKKOS_ENABLE_CUDA) && !defined(KOKKOS_ENABLE_HIP) &&             \
+    !defined(KOKKOS_ENABLE_SYCL)
+#define KWQFT_SITE_SIMD 1
+#include <Kokkos_SIMD.hpp>
+#endif
 
 namespace kwqft {
+
+/// Scalar element type of \p T: T itself, or T::value_type for SIMD packs.
+template <typename T, typename = void> struct scalar_of {
+  using type = T;
+};
+template <typename T>
+struct scalar_of<T, std::void_t<typename T::value_type>> {
+  using type = typename T::value_type;
+};
+template <typename T> using scalar_of_t = typename scalar_of<T>::type;
 
 //=============================================================================
 // Configuration macros

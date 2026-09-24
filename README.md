@@ -87,11 +87,15 @@ If you enable `KWQFT_ENABLE_CUDA=ON` but do not set any `Kokkos_ARCH_*` option, 
 ### CPU SIMD
 
 OpenMP builds batch independent lattice sites with
-`Kokkos::Experimental::simd` for all supported Nc. The gauge field remains in the same
-element-major SOA layout; AVX2, AVX-512, NEON, or SVE is selected by the
-Kokkos architecture option. Use `-DKokkos_ARCH_NATIVE=ON` when building on the
-target CPU. The CUDA, HIP, and SYCL kernels keep their scalar-per-site path.
-Set `-DKWQFT_ENABLE_HOST_SIMD=OFF` to build a scalar CPU comparison.
+`Kokkos::Experimental::simd` for all supported Nc: staple, link load/store,
+heatbath and overrelaxation run on one SIMD lane per site, and only the SU(2)
+heatbath sampler draws lane by lane from each site's own RNG stream. The gauge
+field remains in the same element-major SOA layout; AVX2, AVX-512, NEON, or SVE
+is selected by the Kokkos architecture option, and consecutive sites are
+loaded with de-interleaving vector loads. Use
+`-DKokkos_ARCH_NATIVE=ON` when building on the target CPU. The CUDA, HIP, and
+SYCL kernels keep their scalar-per-site path. Set
+`-DKWQFT_ENABLE_HOST_SIMD=OFF` to build a scalar CPU comparison.
 
 ### AMD GPU Version (HIP)
 

@@ -15,10 +15,7 @@
 #include "neighbor_access.hpp"
 #include "shift.hpp"
 #include "shift_field.hpp"
-
-#if defined(KOKKOS_ENABLE_OPENMP) && defined(KWQFT_ENABLE_HOST_SIMD)
-#include <Kokkos_SIMD.hpp>
-#endif
+#include "site_simd.hpp"
 
 namespace kwqft {
 
@@ -87,81 +84,27 @@ calculateStapleLazy(const Complex<Real> *gaugePtr, int64_t soa_stride,
   return staple;
 }
 
-#if defined(KOKKOS_ENABLE_OPENMP) && defined(KWQFT_ENABLE_HOST_SIMD)
+#ifdef KWQFT_SITE_SIMD
 /**
- * @brief Load one matrix for a native-SIMD batch of independent lattice sites.
+ * @brief Load \p field at the W sites of one SIMD batch.
  *
- * Gauge storage stays element-major SOA. Address resolution is scalar because
- * shifted/MPI sites can be gathers; all color algebra after this load is SIMD.
+ * \p x holds each lane's decoded coordinates, so address resolution only
+ * applies the shift chain (no per-leg EO decode).
  */
 template <typename Real, typename Simd>
 KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION void loadLatticeColorMatrixBatch(
     const LatticeColorMatrix<Real> &field, const int64_t *idx_eo,
-    const LatticeParams &p, const GaugeHaloDevice<Real> *halo,
-    MatrixSun<Simd, NCOLORS> &U) {
+    const int (*x)[NDIMS], const LatticeParams &p,
+    const GaugeHaloDevice<Real> *halo, MatrixSun<Simd, NCOLORS> &U) {
   constexpr int width = static_cast<int>(Simd::size());
   GaugeLinkRef<Real> ref[width];
   for (int lane = 0; lane < width; ++lane) {
-    ref[lane] = field.resolve_at(idx_eo[lane], p, halo);
+    ref[lane] = field.resolve_at_coords(idx_eo[lane], x[lane], p, halo);
   }
-
-  const bool adjoint = field.adjoint();
-  if constexpr (NCOLORS == 3) {
-    // SOA12 is used only for single-process SU(3). Load its two stored rows
-    // without transposing, reconstruct row 3 lane-wise, then apply adjoint.
-    if (field.array_type() == ArrayType::SOA12 && !p.mpi) {
-      for (int i = 0; i < 2; ++i) {
-        for (int j = 0; j < 3; ++j) {
-          const Simd re([&](auto lane_c) {
-            constexpr int lane = decltype(lane_c)::value;
-            return ref[lane].ptr == nullptr
-                       ? Real(0)
-                       : ref[lane].ptr[(j + i * 3) * ref[lane].stride].real();
-          });
-          const Simd im([&](auto lane_c) {
-            constexpr int lane = decltype(lane_c)::value;
-            return ref[lane].ptr == nullptr
-                       ? Real(0)
-                       : ref[lane].ptr[(j + i * 3) * ref[lane].stride].imag();
-          });
-          U.e[i][j] = Complex<Simd>(re, im);
-        }
-      }
-      reconstruct12p(U);
-      if (adjoint) {
-        U = U.dagger();
-      }
-      return;
-    }
-  }
-
-  for (int i = 0; i < NCOLORS; ++i) {
-    for (int j = 0; j < NCOLORS; ++j) {
-      const int src_i = adjoint ? j : i;
-      const int src_j = adjoint ? i : j;
-      const Simd re([&](auto lane_c) {
-        constexpr int lane = decltype(lane_c)::value;
-        if (ref[lane].ptr == nullptr) {
-          return Real(0);
-        }
-        return ref[lane]
-            .ptr[(src_j + src_i * NCOLORS) * ref[lane].stride]
-            .real();
-      });
-      const Simd im([&](auto lane_c) {
-        constexpr int lane = decltype(lane_c)::value;
-        if (ref[lane].ptr == nullptr) {
-          return Real(0);
-        }
-        const Real value =
-            ref[lane].ptr[(src_j + src_i * NCOLORS) * ref[lane].stride].imag();
-        return adjoint ? -value : value;
-      });
-      U.e[i][j] = Complex<Simd>(re, im);
-    }
-  }
+  loadMatrixBatch<Real, Simd>(ref, field.adjoint(), U);
 }
 
+/// \ref calculateStapleLazy for the W sites \p id[0..W) of one SIMD batch.
 template <typename Real, typename Simd>
 KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION MatrixSun<Simd, NCOLORS>
 calculateStapleLazyBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
@@ -173,9 +116,11 @@ calculateStapleLazyBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
   constexpr int width = static_cast<int>(Simd::size());
   const LatticeGaugeLinks<Real> u(gaugePtr, soa_stride, atype);
   int64_t idx_eo[width];
+  int x[width][NDIMS];
   for (int lane = 0; lane < width; ++lane) {
     idx_eo[lane] =
         id[lane] + static_cast<int64_t>(oddbit) * params.half_volume;
+    eo_to_coords(id[lane], oddbit, x[lane], params);
   }
 
   MatrixV staple = MatrixV::zero();
@@ -192,25 +137,26 @@ calculateStapleLazyBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
     const LatticeColorMatrix<Real> U_nu_fwd_mu_bwd_nu =
         shift(U_nu_fwd_mu, BACKWARD, nu);
 
-    loadLatticeColorMatrixBatch<Real, Simd>(u[nu], idx_eo, params, halo, link);
-    loadLatticeColorMatrixBatch<Real, Simd>(U_mu_fwd_nu, idx_eo, params, halo,
-                                            buf);
+    loadLatticeColorMatrixBatch<Real, Simd>(u[nu], idx_eo, x, params, halo,
+                                            link);
+    loadLatticeColorMatrixBatch<Real, Simd>(U_mu_fwd_nu, idx_eo, x, params,
+                                            halo, buf);
     link *= buf;
-    loadLatticeColorMatrixBatch<Real, Simd>(U_nu_fwd_mu, idx_eo, params, halo,
-                                            buf);
+    loadLatticeColorMatrixBatch<Real, Simd>(U_nu_fwd_mu, idx_eo, x, params,
+                                            halo, buf);
     link = UUDagger(link, buf);
     if (coeff != Real(1)) {
       link *= Simd(coeff);
     }
     staple += link;
 
-    loadLatticeColorMatrixBatch<Real, Simd>(adj(U_nu_bwd_nu), idx_eo, params,
-                                            halo, link);
-    loadLatticeColorMatrixBatch<Real, Simd>(U_mu_bwd_nu, idx_eo, params, halo,
-                                            buf);
-    link *= buf;
-    loadLatticeColorMatrixBatch<Real, Simd>(U_nu_fwd_mu_bwd_nu, idx_eo, params,
+    loadLatticeColorMatrixBatch<Real, Simd>(adj(U_nu_bwd_nu), idx_eo, x,
+                                            params, halo, link);
+    loadLatticeColorMatrixBatch<Real, Simd>(U_mu_bwd_nu, idx_eo, x, params,
                                             halo, buf);
+    link *= buf;
+    loadLatticeColorMatrixBatch<Real, Simd>(U_nu_fwd_mu_bwd_nu, idx_eo, x,
+                                            params, halo, buf);
     link *= buf;
     if (coeff != Real(1)) {
       link *= Simd(coeff);
@@ -218,18 +164,6 @@ calculateStapleLazyBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
     staple += link;
   }
   return staple;
-}
-
-template <typename Real, typename Simd>
-KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION void
-extractMatrixLane(const MatrixSun<Simd, NCOLORS> &src, int lane,
-                  MatrixSun<Real, NCOLORS> &dst) {
-  for (int i = 0; i < NCOLORS; ++i) {
-    for (int j = 0; j < NCOLORS; ++j) {
-      dst.e[i][j] =
-          Complex<Real>(src.e[i][j].real()[lane], src.e[i][j].imag()[lane]);
-    }
-  }
 }
 #endif
 

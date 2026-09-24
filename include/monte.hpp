@@ -37,8 +37,23 @@ namespace kwqft {
  * @brief Pseudo-heatbath update for SU(N)
  *
  * Updates a link using the pseudo-heatbath algorithm
- * by iterating over SU(2) subgroups
+ * by iterating over SU(2) subgroups.
+ *
+ * \p Real may also be a SIMD pack of independent sites; \p gen is then a
+ * callable returning the SU(2) heatbath matrix for a pack of couplings,
+ * drawn lane by lane from each site's own stream. The scalar case calls
+ * \ref generateSu2Matrix_milc directly: wrapping it in a lambda changes
+ * GCC's FMA contraction and hence the scalar/GPU trajectory.
  */
+template <typename Real, typename Generator>
+KOKKOS_INLINE_FUNCTION Msu2<Real> drawHeatBathSu2(Real ap, Generator &gen) {
+  if constexpr (std::is_floating_point_v<Real>) {
+    return generateSu2Matrix_milc<Real>(ap, gen);
+  } else {
+    return gen(ap);
+  }
+}
+
 template <typename Real, typename Generator>
 KOKKOS_INLINE_FUNCTION void heatBathSun(MatrixSun<Real, NCOLORS> &U,
                                         const MatrixSun<Real, NCOLORS> &F,
@@ -51,10 +66,10 @@ KOKKOS_INLINE_FUNCTION void heatBathSun(MatrixSun<Real, NCOLORS> &U,
   int p = 0, q = 1;
   Msu2<Real> r = getBlockSu2<Real, NCOLORS>(F, p, q);
   Real k = r.abs();
-  Real ap = static_cast<Real>(beta_over_nc) * k;
+  Real ap = Real(static_cast<scalar_of_t<Real>>(beta_over_nc)) * k;
   k = Real(1) / k;
   r *= k;
-  Msu2<Real> a = generateSu2Matrix_milc<Real>(ap, gen);
+  Msu2<Real> a = drawHeatBathSu2<Real>(ap, gen);
   Msu2<Real> rr = mulsu2UVDagger<Real>(a, r);
   U = MatrixSun<Real, NCOLORS>::identity();
   U.e[0][0] = ComplexT(rr.a0(), rr.a3());
@@ -88,11 +103,11 @@ KOKKOS_INLINE_FUNCTION void heatBathSun(MatrixSun<Real, NCOLORS> &U,
     r.a3() = a0.imag() - a3.imag();
 
     Real k = r.abs();
-    Real ap = static_cast<Real>(beta_over_nc) * k;
+    Real ap = Real(static_cast<scalar_of_t<Real>>(beta_over_nc)) * k;
     k = Real(1) / k;
     r *= k;
 
-    Msu2<Real> a = generateSu2Matrix_milc<Real>(ap, gen);
+    Msu2<Real> a = drawHeatBathSu2<Real>(ap, gen);
     r = mulsu2UVDagger<Real>(a, r);
 
     // Update U = su2 * U
@@ -117,11 +132,11 @@ KOKKOS_INLINE_FUNCTION void heatBathSun(MatrixSun<Real, NCOLORS> &U,
 
     Msu2<Real> r = getBlockSu2<Real, NCOLORS>(M, p, q);
     Real k = r.abs();
-    Real ap = static_cast<Real>(beta_over_nc) * k;
+    Real ap = Real(static_cast<scalar_of_t<Real>>(beta_over_nc)) * k;
     k = Real(1) / k;
     r *= k;
 
-    Msu2<Real> a = generateSu2Matrix_milc<Real>(ap, gen);
+    Msu2<Real> a = drawHeatBathSu2<Real>(ap, gen);
     Msu2<Real> rr = mulsu2UVDagger<Real>(a, r);
 
     mulBlockSun<Real, NCOLORS>(rr, U, p, q);
@@ -242,6 +257,84 @@ overrelaxUpdateSite(Complex<Real> *gaugePtr, int64_t soa_stride,
   storeGaugeMatrix(gaugePtr, link_base, soa_stride, atype, U);
 }
 
+#ifdef KWQFT_SITE_SIMD
+//=============================================================================
+// Cross-site SIMD update bodies (OpenMP host): the W sites id[0..W) of one
+// batch are updated together as MatrixSun<simd<Real>>. Staple, link algebra,
+// load and store are SIMD; only the SU(2) heatbath draw is per lane, from the
+// same per-site RNG stream and in the same order as the scalar update.
+//=============================================================================
+
+template <typename Real, typename Simd>
+KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION void
+loadLinkBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
+              const int64_t *id, int parity, int mu,
+              const LatticeParams &params, ArrayType atype, int64_t *link_base,
+              MatrixSun<Simd, NCOLORS> &U) {
+  constexpr int width = static_cast<int>(Simd::size());
+  GaugeLinkRef<Real> ref[width];
+  for (int lane = 0; lane < width; ++lane) {
+    const int64_t idxoddbit = id[lane] + parity * params.half_volume;
+    link_base[lane] = idxoddbit + mu * params.volume;
+    ref[lane] =
+        gaugeLinkRefSoa(gaugePtr, idxoddbit, mu, soa_stride, params, atype);
+  }
+  loadMatrixBatch<Real, Simd>(ref, false, U);
+}
+
+template <typename Real, typename Simd, typename PoolType>
+KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION void
+heatBathUpdateBatch(Complex<Real> *gaugePtr, int64_t soa_stride,
+                    const GaugeHaloDevice<Real> *halo, const int64_t *id,
+                    int parity, int mu, const LatticeParams &params,
+                    ArrayType atype, double betaOverNc, const PoolType &pool) {
+  using MatrixV = MatrixSun<Simd, NCOLORS>;
+  constexpr int width = static_cast<int>(Simd::size());
+  const MatrixV staple = calculateStapleLazyBatch<Real, Simd>(
+      gaugePtr, soa_stride, halo, id, parity, mu, params, atype);
+
+  int64_t link_base[width];
+  MatrixV U;
+  loadLinkBatch<Real, Simd>(gaugePtr, soa_stride, id, parity, mu, params,
+                            atype, link_base, U);
+  auto sample = [&](const Simd &ap) {
+    Real a[4][width];
+    for (int lane = 0; lane < width; ++lane) {
+      auto gen = pool.get_state(static_cast<uint64_t>(id[lane]));
+      const Msu2<Real> s = generateSu2Matrix_milc<Real>(ap[lane], gen);
+      pool.free_state(gen);
+      for (int c = 0; c < 4; ++c) {
+        a[c][lane] = s.m_a[c];
+      }
+    }
+    constexpr auto flag = Kokkos::Experimental::simd_flag_default;
+    return Msu2<Simd>(Simd(a[0], flag), Simd(a[1], flag), Simd(a[2], flag),
+                      Simd(a[3], flag));
+  };
+  heatBathSun<Simd>(U, staple.dagger(), betaOverNc, sample);
+  storeMatrixBatch<Real, Simd>(gaugePtr, link_base, soa_stride, atype, U);
+}
+
+template <typename Real, typename Simd>
+KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION void
+overrelaxUpdateBatch(Complex<Real> *gaugePtr, int64_t soa_stride,
+                     const GaugeHaloDevice<Real> *halo, const int64_t *id,
+                     int parity, int mu, const LatticeParams &params,
+                     ArrayType atype) {
+  using MatrixV = MatrixSun<Simd, NCOLORS>;
+  constexpr int width = static_cast<int>(Simd::size());
+  const MatrixV staple = calculateStapleLazyBatch<Real, Simd>(
+      gaugePtr, soa_stride, halo, id, parity, mu, params, atype);
+
+  int64_t link_base[width];
+  MatrixV U;
+  loadLinkBatch<Real, Simd>(gaugePtr, soa_stride, id, parity, mu, params,
+                            atype, link_base, U);
+  overrelaxationSun<Simd>(U, staple.dagger());
+  storeMatrixBatch<Real, Simd>(gaugePtr, link_base, soa_stride, atype, U);
+}
+#endif
+
 //=============================================================================
 // One device kernel per update kind.
 //
@@ -261,9 +354,9 @@ void launchHeatBathSweep(const char *label, int64_t n, const SiteList &list,
                          int parity, int mu, const LatticeParams &params,
                          ArrayType atype, double betaOverNc,
                          const PoolType &pool) {
-#if defined(KOKKOS_ENABLE_OPENMP) && defined(KWQFT_ENABLE_HOST_SIMD)
-  using Simd = Kokkos::Experimental::simd<Real>;
-  if constexpr (NCOLORS >= 2 && Simd::size() > 1) {
+#ifdef KWQFT_SITE_SIMD
+  using Simd = SiteSimd<Real>;
+  if constexpr (Simd::size() > 1) {
     constexpr int width = static_cast<int>(Simd::size());
     const int64_t batches = n / width;
     Kokkos::parallel_for(
@@ -274,22 +367,9 @@ void launchHeatBathSweep(const char *label, int64_t n, const SiteList &list,
             const int64_t i = begin + lane;
             id[lane] = has_list ? list(i) : i;
           }
-          const auto staple_v = calculateStapleLazyBatch<Real, Simd>(
+          heatBathUpdateBatch<Real, Simd>(
               gaugePtr, size, use_halo ? &halo_dev : nullptr, id, parity, mu,
-              params, atype);
-          for (int lane = 0; lane < width; ++lane) {
-            MatrixSun<Real, NCOLORS> staple;
-            extractMatrixLane<Real>(staple_v, lane, staple);
-            auto gen = pool.get_state(static_cast<uint64_t>(id[lane]));
-            const int64_t idxoddbit =
-                id[lane] + parity * params.half_volume;
-            const int64_t link_base = idxoddbit + mu * params.volume;
-            MatrixSun<Real, NCOLORS> U;
-            loadGaugeMatrix(gaugePtr, link_base, size, atype, U);
-            heatBathSun<Real>(U, staple.dagger(), betaOverNc, gen);
-            storeGaugeMatrix(gaugePtr, link_base, size, atype, U);
-            pool.free_state(gen);
-          }
+              params, atype, betaOverNc, pool);
         });
 
     const int64_t tail = batches * width;
@@ -318,9 +398,9 @@ void launchOverrelaxSweep(const char *label, int64_t n, const SiteList &list,
                           const GaugeHaloDevice<Real> &halo_dev, bool use_halo,
                           int parity, int mu, const LatticeParams &params,
                           ArrayType atype) {
-#if defined(KOKKOS_ENABLE_OPENMP) && defined(KWQFT_ENABLE_HOST_SIMD)
-  using Simd = Kokkos::Experimental::simd<Real>;
-  if constexpr (NCOLORS >= 2 && Simd::size() > 1) {
+#ifdef KWQFT_SITE_SIMD
+  using Simd = SiteSimd<Real>;
+  if constexpr (Simd::size() > 1) {
     constexpr int width = static_cast<int>(Simd::size());
     const int64_t batches = n / width;
     Kokkos::parallel_for(
@@ -331,20 +411,9 @@ void launchOverrelaxSweep(const char *label, int64_t n, const SiteList &list,
             const int64_t i = begin + lane;
             id[lane] = has_list ? list(i) : i;
           }
-          const auto staple_v = calculateStapleLazyBatch<Real, Simd>(
+          overrelaxUpdateBatch<Real, Simd>(
               gaugePtr, size, use_halo ? &halo_dev : nullptr, id, parity, mu,
               params, atype);
-          for (int lane = 0; lane < width; ++lane) {
-            MatrixSun<Real, NCOLORS> staple;
-            extractMatrixLane<Real>(staple_v, lane, staple);
-            const int64_t idxoddbit =
-                id[lane] + parity * params.half_volume;
-            const int64_t link_base = idxoddbit + mu * params.volume;
-            MatrixSun<Real, NCOLORS> U;
-            loadGaugeMatrix(gaugePtr, link_base, size, atype, U);
-            overrelaxationSun<Real>(U, staple.dagger());
-            storeGaugeMatrix(gaugePtr, link_base, size, atype, U);
-          }
         });
 
     const int64_t tail = batches * width;

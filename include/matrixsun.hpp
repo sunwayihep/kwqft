@@ -15,6 +15,42 @@
 
 namespace kwqft {
 
+/// SIMD-pack GEMM. Kokkos SIMD operators map to separate multiply and add
+/// instructions, so the complex products are written as explicit FMAs. Terms
+/// that enter with a minus sign go to separate accumulators (Kokkos has no
+/// fused multiply-subtract), which also gives four independent FMA chains.
+template <bool HermA, bool HermB, typename Real, int Nc>
+KOKKOS_INLINE_FUNCTION void
+gemm_ijk_fma(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
+             Complex<Real> (&C)[Nc][Nc]) {
+  for (int i = 0; i < Nc; ++i) {
+    for (int j = 0; j < Nc; ++j) {
+      Real xp(0), xm(0), yp(0), ym(0);
+      for (int k = 0; k < Nc; ++k) {
+        const Complex<Real> &a = HermA ? A[k][i] : A[i][k];
+        const Complex<Real> &b = HermB ? B[j][k] : B[k][j];
+        xp = Kokkos::fma(a.x, b.x, xp);
+        if constexpr (HermA != HermB) {
+          xp = Kokkos::fma(a.y, b.y, xp);
+        } else {
+          xm = Kokkos::fma(a.y, b.y, xm);
+        }
+        if constexpr (HermB) {
+          ym = Kokkos::fma(a.x, b.y, ym);
+        } else {
+          yp = Kokkos::fma(a.x, b.y, yp);
+        }
+        if constexpr (HermA) {
+          ym = Kokkos::fma(a.y, b.x, ym);
+        } else {
+          yp = Kokkos::fma(a.y, b.x, yp);
+        }
+      }
+      C[i][j] = Complex<Real>(xp - xm, yp - ym);
+    }
+  }
+}
+
 template <bool HermA, bool HermB, typename Real, int Nc>
 KOKKOS_INLINE_FUNCTION void
 gemm_ijk(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
@@ -52,7 +88,11 @@ template <bool HermA, bool HermB, typename Real, int Nc>
 KOKKOS_INLINE_FUNCTION void
 sun_gemm(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
          Complex<Real> (&C)[Nc][Nc]) {
-  gemm_ijk<HermA, HermB>(A, B, C);
+  if constexpr (std::is_floating_point_v<Real>) {
+    gemm_ijk<HermA, HermB>(A, B, C);
+  } else {
+    gemm_ijk_fma<HermA, HermB>(A, B, C);
+  }
 }
 
 /**

@@ -144,6 +144,58 @@ public:
                                     atype_);
   }
 
+  /**
+   * @brief \ref resolve_at for a site whose coordinates \p x0 are already
+   *        decoded from \p idx_eo.
+   *
+   * Used by cross-site SIMD batches, which decode each lane once and then
+   * resolve every staple leg from those coordinates. Shift chains move a
+   * coordinate by at most \c LCM_MAX_SHIFTS, so the periodic wrap is done by
+   * add/subtract instead of integer division.
+   */
+  KOKKOS_INLINE_FUNCTION
+  GaugeLinkRef<Real> resolve_at_coords(int64_t idx_eo, const int x0[NDIMS],
+                                       const LatticeParams &p,
+                                       const GaugeHaloDevice<Real> *halo) const {
+    if (n_shifts_ == 0) {
+      return gaugeLinkRefSoa(data_, idx_eo, link_dir_, stride_, p, atype_);
+    }
+
+    bool local_eo = true;
+    if (p.mpi) {
+      for (int s = 0; s < n_shifts_; ++s) {
+        if (p.proc_grid[shift_mu_[s]] > 1) {
+          local_eo = false;
+          break;
+        }
+      }
+    }
+
+    int x[NDIMS];
+    for (int d = 0; d < NDIMS; ++d) {
+      x[d] = x0[d];
+    }
+    for (int s = 0; s < n_shifts_; ++s) {
+      x[shift_mu_[s]] += shift_sign_[s];
+    }
+
+    if (local_eo) {
+      for (int d = 0; d < NDIMS; ++d) {
+        const int g = p.grid[d];
+        while (x[d] < 0) {
+          x[d] += g;
+        }
+        while (x[d] >= g) {
+          x[d] -= g;
+        }
+      }
+      const int64_t idx = coords_to_eo_idx(x, p);
+      return gaugeLinkRefSoa(data_, idx, link_dir_, stride_, p, atype_);
+    }
+    return resolveGaugeLinkAtCoords(data_, stride_, halo, x, link_dir_, p,
+                                    atype_);
+  }
+
 private:
   const ComplexT *data_{nullptr};
   int64_t stride_{0};
