@@ -146,7 +146,8 @@ KOKKOS_INLINE_FUNCTION void indexNdEo(int x[ND], int64_t id, int oddbit,
   x[0] = static_cast<int>((id * 2 + xodd) - id / (X[0] / 2) * X[0]);
 }
 
-/// Convert site coordinates to even/odd linear index (inverse of \ref indexNdEo).
+/// Convert site coordinates to even/odd linear index (inverse of \ref
+/// indexNdEo).
 template <int ND = NDIMS>
 KOKKOS_INLINE_FUNCTION int64_t coords_to_eo_idx(const int x[ND],
                                                 const LatticeParams &p) {

@@ -154,9 +154,9 @@ public:
    * add/subtract instead of integer division.
    */
   KOKKOS_INLINE_FUNCTION
-  GaugeLinkRef<Real> resolve_at_coords(int64_t idx_eo, const int x0[NDIMS],
-                                       const LatticeParams &p,
-                                       const GaugeHaloDevice<Real> *halo) const {
+  GaugeLinkRef<Real>
+  resolve_at_coords(int64_t idx_eo, const int x0[NDIMS], const LatticeParams &p,
+                    const GaugeHaloDevice<Real> *halo) const {
     if (n_shifts_ == 0) {
       return gaugeLinkRefSoa(data_, idx_eo, link_dir_, stride_, p, atype_);
     }

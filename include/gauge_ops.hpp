@@ -108,9 +108,8 @@ KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION void loadLatticeColorMatrixBatch(
 template <typename Real, typename Simd>
 KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION MatrixSun<Simd, NCOLORS>
 calculateStapleLazyBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
-                         const GaugeHaloDevice<Real> *halo,
-                         const int64_t *id, int oddbit, int mu,
-                         const LatticeParams &params,
+                         const GaugeHaloDevice<Real> *halo, const int64_t *id,
+                         int oddbit, int mu, const LatticeParams &params,
                          ArrayType atype = ArrayType::SOA) {
   using MatrixV = MatrixSun<Simd, NCOLORS>;
   constexpr int width = static_cast<int>(Simd::size());
@@ -118,8 +117,7 @@ calculateStapleLazyBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
   int64_t idx_eo[width];
   int x[width][NDIMS];
   for (int lane = 0; lane < width; ++lane) {
-    idx_eo[lane] =
-        id[lane] + static_cast<int64_t>(oddbit) * params.half_volume;
+    idx_eo[lane] = id[lane] + static_cast<int64_t>(oddbit) * params.half_volume;
     eo_to_coords(id[lane], oddbit, x[lane], params);
   }
 
@@ -150,8 +148,8 @@ calculateStapleLazyBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
     }
     staple += link;
 
-    loadLatticeColorMatrixBatch<Real, Simd>(adj(U_nu_bwd_nu), idx_eo, x,
-                                            params, halo, link);
+    loadLatticeColorMatrixBatch<Real, Simd>(adj(U_nu_bwd_nu), idx_eo, x, params,
+                                            halo, link);
     loadLatticeColorMatrixBatch<Real, Simd>(U_mu_bwd_nu, idx_eo, x, params,
                                             halo, buf);
     link *= buf;

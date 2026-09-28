@@ -56,8 +56,8 @@ KOKKOS_INLINE_FUNCTION Msu2<Real> drawHeatBathSu2(Real ap, Generator &gen) {
 
 template <typename Real, typename Generator>
 KWQFT_INLINE_FUNCTION void heatBathSun(MatrixSun<Real, NCOLORS> &U,
-                                        const MatrixSun<Real, NCOLORS> &F,
-                                        double beta_over_nc, Generator &gen) {
+                                       const MatrixSun<Real, NCOLORS> &F,
+                                       double beta_over_nc, Generator &gen) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
   using ComplexT = Complex<Real>;
 
@@ -295,8 +295,8 @@ heatBathUpdateBatch(Complex<Real> *gaugePtr, int64_t soa_stride,
 
   int64_t link_base[width];
   MatrixV U;
-  loadLinkBatch<Real, Simd>(gaugePtr, soa_stride, id, parity, mu, params,
-                            atype, link_base, U);
+  loadLinkBatch<Real, Simd>(gaugePtr, soa_stride, id, parity, mu, params, atype,
+                            link_base, U);
   auto sample = [&](const Simd &ap) {
     Real a[4][width];
     for (int lane = 0; lane < width; ++lane) {
@@ -328,8 +328,8 @@ overrelaxUpdateBatch(Complex<Real> *gaugePtr, int64_t soa_stride,
 
   int64_t link_base[width];
   MatrixV U;
-  loadLinkBatch<Real, Simd>(gaugePtr, soa_stride, id, parity, mu, params,
-                            atype, link_base, U);
+  loadLinkBatch<Real, Simd>(gaugePtr, soa_stride, id, parity, mu, params, atype,
+                            link_base, U);
   overrelaxationSun<Simd>(U, staple.dagger());
   storeMatrixBatch<Real, Simd>(gaugePtr, link_base, soa_stride, atype, U);
 }
@@ -376,9 +376,9 @@ void launchHeatBathSweep(const char *label, int64_t n, const SiteList &list,
     Kokkos::parallel_for(
         label, range_policy(tail, n), KOKKOS_LAMBDA(const int64_t i) {
           const int64_t id = has_list ? list(i) : i;
-          heatBathUpdateSite<Real>(
-              gaugePtr, size, use_halo ? &halo_dev : nullptr, id, parity, mu,
-              params, atype, betaOverNc, pool);
+          heatBathUpdateSite<Real>(gaugePtr, size,
+                                   use_halo ? &halo_dev : nullptr, id, parity,
+                                   mu, params, atype, betaOverNc, pool);
         });
     return;
   }
@@ -411,18 +411,18 @@ void launchOverrelaxSweep(const char *label, int64_t n, const SiteList &list,
             const int64_t i = begin + lane;
             id[lane] = has_list ? list(i) : i;
           }
-          overrelaxUpdateBatch<Real, Simd>(
-              gaugePtr, size, use_halo ? &halo_dev : nullptr, id, parity, mu,
-              params, atype);
+          overrelaxUpdateBatch<Real, Simd>(gaugePtr, size,
+                                           use_halo ? &halo_dev : nullptr, id,
+                                           parity, mu, params, atype);
         });
 
     const int64_t tail = batches * width;
     Kokkos::parallel_for(
         label, range_policy(tail, n), KOKKOS_LAMBDA(const int64_t i) {
           const int64_t id = has_list ? list(i) : i;
-          overrelaxUpdateSite<Real>(
-              gaugePtr, size, use_halo ? &halo_dev : nullptr, id, parity, mu,
-              params, atype);
+          overrelaxUpdateSite<Real>(gaugePtr, size,
+                                    use_halo ? &halo_dev : nullptr, id, parity,
+                                    mu, params, atype);
         });
     return;
   }

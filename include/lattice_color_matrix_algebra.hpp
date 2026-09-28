@@ -23,10 +23,10 @@
 namespace kwqft {
 
 template <typename Real>
-KOKKOS_INLINE_FUNCTION void loadLatticeColorMatrix(
-    const LatticeColorMatrix<Real> &field, int64_t idx_eo,
-    const LatticeParams &p, MatrixSun<Real, NCOLORS> &U,
-    const GaugeHaloDevice<Real> *halo = nullptr) {
+KOKKOS_INLINE_FUNCTION void
+loadLatticeColorMatrix(const LatticeColorMatrix<Real> &field, int64_t idx_eo,
+                       const LatticeParams &p, MatrixSun<Real, NCOLORS> &U,
+                       const GaugeHaloDevice<Real> *halo = nullptr) {
   field.load_at(idx_eo, p, halo, U);
 }
 
@@ -97,8 +97,7 @@ Real realTraceSum(const LatticeColorMatrix<Real> &field,
                   const GaugeHaloDevice<Real> *halo = nullptr) {
   const int64_t vol = PARAMS::params.volume;
   auto dparams = get_device_params();
-  const GaugeHaloDevice<Real> halo_cap =
-      halo ? *halo : GaugeHaloDevice<Real>{};
+  const GaugeHaloDevice<Real> halo_cap = halo ? *halo : GaugeHaloDevice<Real>{};
   const bool have_halo = halo != nullptr;
   Real sum = 0;
 
@@ -121,8 +120,7 @@ Real realTraceSum(const LcmProduct<Real, N> &prod,
                   const GaugeHaloDevice<Real> *halo = nullptr) {
   const int64_t vol = PARAMS::params.volume;
   auto dparams = get_device_params();
-  const GaugeHaloDevice<Real> halo_cap =
-      halo ? *halo : GaugeHaloDevice<Real>{};
+  const GaugeHaloDevice<Real> halo_cap = halo ? *halo : GaugeHaloDevice<Real>{};
   const bool have_halo = halo != nullptr;
   Real sum = 0;
 

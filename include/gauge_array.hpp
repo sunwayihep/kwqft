@@ -143,9 +143,7 @@ public:
   /**
    * @brief Get number of complex elements per link
    */
-  int getNumElems() const {
-    return gauge_complex_elems(arrayType_);
-  }
+  int getNumElems() const { return gauge_complex_elems(arrayType_); }
 
   /**
    * @brief Get total memory size in bytes

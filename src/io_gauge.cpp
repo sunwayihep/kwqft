@@ -3,9 +3,9 @@
  * @brief I/O functions for gauge field configurations
  */
 
+#include "io_gauge.hpp"
 #include "constants.hpp"
 #include "index.hpp"
-#include "io_gauge.hpp"
 #include "mpi_layout.hpp"
 #include "shift.hpp"
 
@@ -53,10 +53,8 @@ void cast_links_from_file(const MatrixSun<RealSaveConf, NCOLORS> *src,
   for (int dir = 0; dir < ndirs; ++dir) {
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
-        dst[dir].e[i][j].real() =
-            static_cast<Real>(src[dir].e[i][j].real());
-        dst[dir].e[i][j].imag() =
-            static_cast<Real>(src[dir].e[i][j].imag());
+        dst[dir].e[i][j].real() = static_cast<Real>(src[dir].e[i][j].real());
+        dst[dir].e[i][j].imag() = static_cast<Real>(src[dir].e[i][j].imag());
       }
     }
   }
@@ -82,8 +80,8 @@ bool config_params_mismatch(const LatticeParams &p, const int grid_dim[NDIMS],
 } // namespace
 
 template <typename Real, typename RealSaveConf>
-void save_gauge_binary(const GaugeArray<Real> &gauge, const std::string &filename,
-                       bool withheader) {
+void save_gauge_binary(const GaugeArray<Real> &gauge,
+                       const std::string &filename, bool withheader) {
   const LatticeParams &p = PARAMS::params;
 
   if (!gauge.even_odd()) {
@@ -233,10 +231,10 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
   }
   const int64_t global_volume = global_volume_total(p);
   const int64_t expected_body_bytes =
-      global_volume * static_cast<int64_t>(
-                          (sizeof(Real) != sizeof(RealSaveConf))
-                              ? link_file_bytes
-                              : link_bytes);
+      global_volume *
+      static_cast<int64_t>((sizeof(Real) != sizeof(RealSaveConf))
+                               ? link_file_bytes
+                               : link_bytes);
 
   std::ifstream filein;
   if (rank == master) {

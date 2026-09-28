@@ -20,9 +20,9 @@ namespace kwqft {
 /// that enter with a minus sign go to separate accumulators (Kokkos has no
 /// fused multiply-subtract), which also gives four independent FMA chains.
 template <bool HermA, bool HermB, typename Real, int Nc>
-KOKKOS_INLINE_FUNCTION void
-gemm_ijk_fma(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
-             Complex<Real> (&C)[Nc][Nc]) {
+KOKKOS_INLINE_FUNCTION void gemm_ijk_fma(const Complex<Real> (&A)[Nc][Nc],
+                                         const Complex<Real> (&B)[Nc][Nc],
+                                         Complex<Real> (&C)[Nc][Nc]) {
   for (int i = 0; i < Nc; ++i) {
     for (int j = 0; j < Nc; ++j) {
       Real xp(0), xm(0), yp(0), ym(0);
@@ -52,9 +52,9 @@ gemm_ijk_fma(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
 }
 
 template <bool HermA, bool HermB, typename Real, int Nc>
-KWQFT_INLINE_FUNCTION void
-gemm_ijk(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
-         Complex<Real> (&C)[Nc][Nc]) {
+KWQFT_INLINE_FUNCTION void gemm_ijk(const Complex<Real> (&A)[Nc][Nc],
+                                    const Complex<Real> (&B)[Nc][Nc],
+                                    Complex<Real> (&C)[Nc][Nc]) {
   for (int i = 0; i < Nc; ++i) {
     for (int j = 0; j < Nc; ++j) {
       Complex<Real> s;
@@ -85,9 +85,9 @@ gemm_ijk(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
 
 /// C = op(A) * op(B). HermX selects conjugate-transpose.
 template <bool HermA, bool HermB, typename Real, int Nc>
-KWQFT_INLINE_FUNCTION void
-sun_gemm(const Complex<Real> (&A)[Nc][Nc], const Complex<Real> (&B)[Nc][Nc],
-         Complex<Real> (&C)[Nc][Nc]) {
+KWQFT_INLINE_FUNCTION void sun_gemm(const Complex<Real> (&A)[Nc][Nc],
+                                    const Complex<Real> (&B)[Nc][Nc],
+                                    Complex<Real> (&C)[Nc][Nc]) {
   if constexpr (std::is_floating_point_v<Real>) {
     gemm_ijk<HermA, HermB>(A, B, C);
   } else {

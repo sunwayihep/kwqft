@@ -44,8 +44,7 @@ namespace kwqft {
 template <typename T, typename = void> struct scalar_of {
   using type = T;
 };
-template <typename T>
-struct scalar_of<T, std::void_t<typename T::value_type>> {
+template <typename T> struct scalar_of<T, std::void_t<typename T::value_type>> {
   using type = typename T::value_type;
 };
 template <typename T> using scalar_of_t = typename scalar_of<T>::type;

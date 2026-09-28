@@ -5,9 +5,9 @@
 
 #include "mpi_layout.hpp"
 #include "constants.hpp"
-#include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #ifdef KWQFT_USE_MPI
 #include <mpi.h>
@@ -45,7 +45,8 @@ void mpi_env_finalize() {
 #endif
 }
 
-void mpi_setup_cartesian(const int proc_grid[NDIMS], const int global_grid[NDIMS]) {
+void mpi_setup_cartesian(const int proc_grid[NDIMS],
+                         const int global_grid[NDIMS]) {
 #ifdef KWQFT_USE_MPI
   int size = 1, rank = 0;
   MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -57,9 +58,8 @@ void mpi_setup_cartesian(const int proc_grid[NDIMS], const int global_grid[NDIMS
   }
   if (prod != size) {
     if (rank == 0) {
-      fprintf(stderr,
-              "KWQFT: product(proc_grid) = %d must equal MPI size %d\n", prod,
-              size);
+      fprintf(stderr, "KWQFT: product(proc_grid) = %d must equal MPI size %d\n",
+              prod, size);
     }
     MPI_Abort(MPI_COMM_WORLD, 1);
   }
@@ -152,7 +152,8 @@ bool parse_geom_argv(int argc, char **argv, int proc_grid[NDIMS],
   int start = 1;
   bool found = false;
   for (int i = 1; i < argc; ++i) {
-    if (std::strcmp(argv[i], "-geom") == 0 || std::strcmp(argv[i], "--geom") == 0) {
+    if (std::strcmp(argv[i], "-geom") == 0 ||
+        std::strcmp(argv[i], "--geom") == 0) {
       if (i + NDIMS >= argc) {
         return false;
       }

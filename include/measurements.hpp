@@ -16,12 +16,12 @@
 #include "gauge_ops.hpp"
 #include "index.hpp"
 #include "kwqft_common.hpp"
+#include "lattice_color_matrix_algebra.hpp"
 #include "matrixsun.hpp"
+#include "mpi_layout.hpp"
 #include "neighbor_access.hpp"
 #include "perf_stats.hpp"
 #include "shift.hpp"
-#include "lattice_color_matrix_algebra.hpp"
-#include "mpi_layout.hpp"
 
 #ifdef KWQFT_USE_MPI
 #include <mpi.h>
@@ -86,10 +86,10 @@ public:
 
     for (int mu = 1; mu < NDIMS; ++mu) {
       for (int nu = 0; nu < mu; ++nu) {
-        Real pairSum = realTraceSum(
-            u[mu] * shift(u[nu], FORWARD, mu) *
-                adj(shift(u[mu], FORWARD, nu)) * adj(u[nu]),
-            "Plaquette", halo_ptr);
+        Real pairSum =
+            realTraceSum(u[mu] * shift(u[nu], FORWARD, mu) *
+                             adj(shift(u[mu], FORWARD, nu)) * adj(u[nu]),
+                         "Plaquette", halo_ptr);
 
         plaqSum += pairSum;
         if (mu == t_dir() || nu == t_dir()) {
@@ -120,7 +120,8 @@ public:
     }
 
     const Real inv_nc_vol = Real(1) / (Real(NCOLORS) * Real(norm_vol));
-    // NDIMS=2: TOTAL_NUM_SPLAQS=0 (only one plaquette plane, counted as temporal).
+    // NDIMS=2: TOTAL_NUM_SPLAQS=0 (only one plaquette plane, counted as
+    // temporal).
     if constexpr (TOTAL_NUM_SPLAQS > 0) {
       spatialValue_ = spatialSum * inv_nc_vol / Real(TOTAL_NUM_SPLAQS);
     } else {
@@ -128,7 +129,8 @@ public:
     }
     temporalValue_ = temporalSum * inv_nc_vol / Real(TOTAL_NUM_TPLAQS);
     if constexpr (TOTAL_NUM_SPLAQS > 0) {
-      // Equal weight of spatial/temporal averages (matches anisotropic reporting).
+      // Equal weight of spatial/temporal averages (matches anisotropic
+      // reporting).
       plaqValue_ = (spatialValue_ + temporalValue_) / Real(2);
     } else {
       plaqValue_ = temporalValue_;
@@ -224,7 +226,8 @@ private:
   PinnedView host_recv_;
   int64_t poly_spatial_vol_{0};
 #ifdef KWQFT_USE_MPI
-  MPI_Comm t_comm_{MPI_COMM_NULL}; // ranks sharing my spatial block, ordered in t
+  MPI_Comm t_comm_{
+      MPI_COMM_NULL}; // ranks sharing my spatial block, ordered in t
 #endif
 
   void ensure_mpi_workspace(int64_t spatialVolume) {
@@ -237,8 +240,7 @@ private:
     recv_poly_ = PolyView(
         Kokkos::view_alloc("PolyakovLoop_recv", Kokkos::WithoutInitializing),
         spatialVolume);
-    const int64_t n_stage =
-        kwqft_mpi_uses_device_buffers() ? 0 : spatialVolume;
+    const int64_t n_stage = kwqft_mpi_uses_device_buffers() ? 0 : spatialVolume;
     host_send_ = PinnedView(
         Kokkos::view_alloc("PolyakovLoop_hsend", Kokkos::WithoutInitializing),
         n_stage);
@@ -320,8 +322,7 @@ public:
       auto local_poly = local_poly_;
 
       Kokkos::parallel_for(
-          "PolyakovLoop_local",
-          range_policy(0, spatialVolume),
+          "PolyakovLoop_local", range_policy(0, spatialVolume),
           KOKKOS_LAMBDA(const int64_t spatialIdx) {
             ComplexT *gaugePtr = gaugeView.data();
 
@@ -347,8 +348,8 @@ public:
       bool holds_result = true;
 #ifdef KWQFT_USE_MPI
       constexpr bool dev_mpi = kwqft_mpi_uses_device_buffers();
-      const int nbytes =
-          static_cast<int>(spatialVolume * static_cast<int64_t>(sizeof(MatrixT)));
+      const int nbytes = static_cast<int>(
+          spatialVolume * static_cast<int64_t>(sizeof(MatrixT)));
       MPI_Comm tc = t_comm();
       auto recv_poly = recv_poly_;
       for (int stride = 1; stride < t_nproc; stride *= 2) {
@@ -367,7 +368,9 @@ public:
           }
           Kokkos::parallel_for(
               "PolyakovLoop_combine", range_policy(0, spatialVolume),
-              KOKKOS_LAMBDA(const int64_t s) { local_poly(s) *= recv_poly(s); });
+              KOKKOS_LAMBDA(const int64_t s) {
+                local_poly(s) *= recv_poly(s);
+              });
           Kokkos::fence();
         } else if (rel == stride) {
           const int partner = t_coord - stride;
@@ -406,9 +409,9 @@ public:
       // CombinedReducer parallel_reduce that also owns the matrices), then
       // two scalar reductions of the per-site traces.
       using TraceView = Kokkos::View<ComplexT *, DefaultMemSpace>;
-      TraceView traces(
-          Kokkos::view_alloc("PolyakovLoop_traces", Kokkos::WithoutInitializing),
-          spatialVolume);
+      TraceView traces(Kokkos::view_alloc("PolyakovLoop_traces",
+                                          Kokkos::WithoutInitializing),
+                       spatialVolume);
       Kokkos::parallel_for(
           "PolyakovLoop_product", range_policy(0, spatialVolume),
           KOKKOS_LAMBDA(const int64_t spatialIdx) {
@@ -455,14 +458,13 @@ public:
       for (int i = 0; i < NDIMS - 1; ++i) {
         global_spatial *= static_cast<int64_t>(params_.global_grid[i]);
       }
-      polyValue_ =
-          ComplexT(static_cast<Real>(gr[0] / static_cast<double>(global_spatial)),
-                   static_cast<Real>(gr[1] / static_cast<double>(global_spatial)));
+      polyValue_ = ComplexT(
+          static_cast<Real>(gr[0] / static_cast<double>(global_spatial)),
+          static_cast<Real>(gr[1] / static_cast<double>(global_spatial)));
     } else
 #endif
     {
-      polyValue_ =
-          ComplexT(polyRe / spatialVolume, polyIm / spatialVolume);
+      polyValue_ = ComplexT(polyRe / spatialVolume, polyIm / spatialVolume);
     }
 
     time_ = timer.seconds();

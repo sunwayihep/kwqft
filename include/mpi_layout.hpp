@@ -1,6 +1,7 @@
 /**
  * @file mpi_layout.hpp
- * @brief MPI Cartesian grid (-geom) and environment (implementation in mpi_layout.cpp)
+ * @brief MPI Cartesian grid (-geom) and environment (implementation in
+ * mpi_layout.cpp)
  */
 
 #ifndef KWQFT_MPI_LAYOUT_HPP
@@ -38,7 +39,8 @@ void mpi_setup_cartesian(const int proc_grid[NDIMS],
 /// Cartesian coordinates of this rank (after \ref mpi_setup_cartesian).
 void mpi_cart_get_coords(int coord[NDIMS]);
 
-/// Neighbor rank in direction mu: sign -1 (backward) or +1 (forward). -1 if error.
+/// Neighbor rank in direction mu: sign -1 (backward) or +1 (forward). -1 if
+/// error.
 int mpi_cart_neighbor(int mu, int sign);
 
 int mpi_comm_rank();

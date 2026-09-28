@@ -33,10 +33,12 @@ void print_usage(const char *prog_name) {
   printf("  Options (any order):\n");
   printf("    -geom|--geom p0 ... p_{n-1}   MPI process grid (default 1^%d;\n",
          NDIMS);
-  printf("                                   MPI builds only; ∏ p_i = ranks)\n");
+  printf(
+      "                                   MPI builds only; ∏ p_i = ranks)\n");
   printf("    -latt|--latt L0 ... L_{n-1}    global lattice (required)\n");
   printf("    -beta B                        gauge coupling (required)\n");
-  printf("    -ntraj N                       number of trajectories (required)\n");
+  printf(
+      "    -ntraj N                       number of trajectories (required)\n");
   printf("    -xi0 X                         bare anisotropy (default 1.0)\n");
   printf("    -nhb N                         heatbath sweeps per trajectory "
          "(default 1, must be > 0)\n");
@@ -67,9 +69,9 @@ ArrayType default_gauge_array_type() {
 }
 
 bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
-                        std::vector<int> &lattice_size, double &beta, int &ntraj,
-                        double &xi0, int &nhb, int &novr, int &nsave,
-                        std::string &err) {
+                        std::vector<int> &lattice_size, double &beta,
+                        int &ntraj, double &xi0, int &nhb, int &novr,
+                        int &nsave, std::string &err) {
   for (int d = 0; d < NDIMS; ++d) {
     proc_grid[d] = 1;
   }
@@ -312,7 +314,8 @@ void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
     if (traj > num_warmup && traj % nsave == 0) {
       std::string filename =
           save_prefix + "_cfg_" + std::to_string(traj) + ".bin";
-      // File format is always full SU(N) matrices (SOA12 reconstructed on save).
+      // File format is always full SU(N) matrices (SOA12 reconstructed on
+      // save).
       save_gauge_binary<double, double>(gauge, filename, false);
     }
   }
@@ -329,7 +332,8 @@ int main(int argc, char *argv[]) {
   kwqft::initialize(argc, argv);
 
   for (int k = 1; k < argc; ++k) {
-    if (std::strcmp(argv[k], "-h") == 0 || std::strcmp(argv[k], "--help") == 0) {
+    if (std::strcmp(argv[k], "-h") == 0 ||
+        std::strcmp(argv[k], "--help") == 0) {
       print_usage(argv[0]);
       kwqft::finalize();
       return 0;

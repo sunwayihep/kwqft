@@ -73,16 +73,16 @@ loadContiguous(const Complex<Real> *p, Simd &re, Simd &im) {
   if constexpr (is_abi_v<Simd, float, kx::simd_abi::avx512_fixed_size<16>>) {
     const __m512 a = _mm512_loadu_ps(r);
     const __m512 b = _mm512_loadu_ps(r + 16);
-    re = Simd(_mm512_permutex2var_ps(
-        a,
-        _mm512_setr_epi32(0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26,
-                          28, 30),
-        b));
-    im = Simd(_mm512_permutex2var_ps(
-        a,
-        _mm512_setr_epi32(1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27,
-                          29, 31),
-        b));
+    re = Simd(
+        _mm512_permutex2var_ps(a,
+                               _mm512_setr_epi32(0, 2, 4, 6, 8, 10, 12, 14, 16,
+                                                 18, 20, 22, 24, 26, 28, 30),
+                               b));
+    im = Simd(
+        _mm512_permutex2var_ps(a,
+                               _mm512_setr_epi32(1, 3, 5, 7, 9, 11, 13, 15, 17,
+                                                 19, 21, 23, 25, 27, 29, 31),
+                               b));
     return;
   }
 #endif
@@ -101,10 +101,10 @@ loadContiguous(const Complex<Real> *p, Simd &re, Simd &im) {
     const __m256 b = _mm256_loadu_ps(r + 8);
     const __m256 e = _mm256_shuffle_ps(a, b, _MM_SHUFFLE(2, 0, 2, 0));
     const __m256 o = _mm256_shuffle_ps(a, b, _MM_SHUFFLE(3, 1, 3, 1));
-    re = Simd(_mm256_castpd_ps(
-        _mm256_permute4x64_pd(_mm256_castps_pd(e), 0xD8)));
-    im = Simd(_mm256_castpd_ps(
-        _mm256_permute4x64_pd(_mm256_castps_pd(o), 0xD8)));
+    re = Simd(
+        _mm256_castpd_ps(_mm256_permute4x64_pd(_mm256_castps_pd(e), 0xD8)));
+    im = Simd(
+        _mm256_castpd_ps(_mm256_permute4x64_pd(_mm256_castps_pd(o), 0xD8)));
     return;
   }
 #endif
@@ -161,11 +161,11 @@ storeContiguous(Complex<Real> *p, const Simd &re, const Simd &im) {
   if constexpr (is_abi_v<Simd, float, kx::simd_abi::avx512_fixed_size<16>>) {
     const __m512 a = static_cast<__m512>(re);
     const __m512 b = static_cast<__m512>(im);
-    _mm512_storeu_ps(r, _mm512_permutex2var_ps(
-                            a,
-                            _mm512_setr_epi32(0, 16, 1, 17, 2, 18, 3, 19, 4, 20,
-                                              5, 21, 6, 22, 7, 23),
-                            b));
+    _mm512_storeu_ps(
+        r, _mm512_permutex2var_ps(a,
+                                  _mm512_setr_epi32(0, 16, 1, 17, 2, 18, 3, 19,
+                                                    4, 20, 5, 21, 6, 22, 7, 23),
+                                  b));
     _mm512_storeu_ps(r + 16,
                      _mm512_permutex2var_ps(
                          a,
@@ -177,19 +177,17 @@ storeContiguous(Complex<Real> *p, const Simd &re, const Simd &im) {
 #endif
 #if defined(KOKKOS_ARCH_AVX2)
   if constexpr (is_abi_v<Simd, double, kx::simd_abi::avx2_fixed_size<4>>) {
-    const __m256d a =
-        _mm256_permute4x64_pd(static_cast<__m256d>(re), 0xD8);
-    const __m256d b =
-        _mm256_permute4x64_pd(static_cast<__m256d>(im), 0xD8);
+    const __m256d a = _mm256_permute4x64_pd(static_cast<__m256d>(re), 0xD8);
+    const __m256d b = _mm256_permute4x64_pd(static_cast<__m256d>(im), 0xD8);
     _mm256_storeu_pd(r, _mm256_unpacklo_pd(a, b));
     _mm256_storeu_pd(r + 4, _mm256_unpackhi_pd(a, b));
     return;
   }
   if constexpr (is_abi_v<Simd, float, kx::simd_abi::avx2_fixed_size<8>>) {
-    const __m256 a = _mm256_castpd_ps(_mm256_permute4x64_pd(
-        _mm256_castps_pd(static_cast<__m256>(re)), 0xD8));
-    const __m256 b = _mm256_castpd_ps(_mm256_permute4x64_pd(
-        _mm256_castps_pd(static_cast<__m256>(im)), 0xD8));
+    const __m256 a = _mm256_castpd_ps(
+        _mm256_permute4x64_pd(_mm256_castps_pd(static_cast<__m256>(re)), 0xD8));
+    const __m256 b = _mm256_castpd_ps(
+        _mm256_permute4x64_pd(_mm256_castps_pd(static_cast<__m256>(im)), 0xD8));
     _mm256_storeu_ps(r, _mm256_unpacklo_ps(a, b));
     _mm256_storeu_ps(r + 8, _mm256_unpackhi_ps(a, b));
     return;
@@ -241,13 +239,13 @@ loadMatrixBatch(const GaugeLinkRef<Real> *ref, bool adjoint,
       }
       for (int i = 0; i < NCOLORS; ++i) {
         for (int j = 0; j < NCOLORS; ++j) {
-          U.e[i][j] = Complex<Simd>(
-              Simd([&](auto k) {
-                return m[static_cast<std::size_t>(k)].e[i][j].x;
-              }),
-              Simd([&](auto k) {
-                return m[static_cast<std::size_t>(k)].e[i][j].y;
-              }));
+          U.e[i][j] =
+              Complex<Simd>(Simd([&](auto k) {
+                              return m[static_cast<std::size_t>(k)].e[i][j].x;
+                            }),
+                            Simd([&](auto k) {
+                              return m[static_cast<std::size_t>(k)].e[i][j].y;
+                            }));
         }
       }
       return;
@@ -325,8 +323,8 @@ storeMatrixBatch(Complex<Real> *ptr, const int64_t *link_base,
     for (int j = 0; j < NCOLORS; ++j) {
       const int64_t off = static_cast<int64_t>(j + i * NCOLORS) * soa_stride;
       if (contiguous) {
-        site_simd_detail::storeContiguous(ptr + link_base[0] + off,
-                                          U.e[i][j].x, U.e[i][j].y);
+        site_simd_detail::storeContiguous(ptr + link_base[0] + off, U.e[i][j].x,
+                                          U.e[i][j].y);
       } else {
         for (int l = 0; l < W; ++l) {
           ptr[link_base[l] + off] =

@@ -23,13 +23,14 @@ namespace kwqft {
  * @param withheader    If true, prepend grid, beta, and precision metadata
  */
 template <typename Real, typename RealSaveConf>
-void save_gauge_binary(const GaugeArray<Real> &gauge, const std::string &filename,
-                       bool withheader = false);
+void save_gauge_binary(const GaugeArray<Real> &gauge,
+                       const std::string &filename, bool withheader = false);
 
 /**
  * @brief Load gauge configuration from CULQCD/sunw binary layout.
  *
- * Inverse of \ref save_gauge_binary. MPI: rank 0 reads and distributes to ranks.
+ * Inverse of \ref save_gauge_binary. MPI: rank 0 reads and distributes to
+ * ranks.
  */
 template <typename Real, typename RealSaveConf>
 void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,

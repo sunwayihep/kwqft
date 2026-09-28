@@ -74,8 +74,8 @@ void initializeParamsDistributed(const std::vector<int> &global_lattice,
   }
   if (global_lattice[0] % proc_grid[0] != 0 ||
       (global_lattice[0] / proc_grid[0]) % 2 != 0) {
-    KWQFT_ERROR(
-        "Local grid[0] must be even for even/odd ordering (global L0 divisible by 2 * proc_grid[0])");
+    KWQFT_ERROR("Local grid[0] must be even for even/odd ordering (global L0 "
+                "divisible by 2 * proc_grid[0])");
   }
 
   LatticeParams &p = PARAMS::params;
@@ -97,11 +97,10 @@ void initializeParamsDistributed(const std::vector<int> &global_lattice,
     // local grid[i] must be even.
     if (proc_grid[i] > 1 && (p.grid[i] % 2) != 0) {
       char msg[256];
-      std::snprintf(
-          msg, sizeof(msg),
-          "Local grid[%d]=%d must be even when proc_grid[%d]=%d "
-          "(MPI even/odd checkerboard)",
-          i, p.grid[i], i, proc_grid[i]);
+      std::snprintf(msg, sizeof(msg),
+                    "Local grid[%d]=%d must be even when proc_grid[%d]=%d "
+                    "(MPI even/odd checkerboard)",
+                    i, p.grid[i], i, proc_grid[i]);
       KWQFT_ERROR(msg);
     }
     p.grid_with_ghost[i] = p.grid[i];
@@ -204,7 +203,8 @@ void print_params() {
     printf("  MPI rank / nproc: %d / %d\n", PARAMS::params.rank,
            PARAMS::params.nproc);
   }
-  printf("  Local volume: %lld\n", static_cast<long long>(PARAMS::params.volume));
+  printf("  Local volume: %lld\n",
+         static_cast<long long>(PARAMS::params.volume));
   printf("  Beta: %.6f\n", PARAMS::params.beta);
   printf("  Beta/Nc: %.6f\n", PARAMS::params.beta_over_nc);
   printf("  Xi0: %.6f\n", PARAMS::params.xi0);

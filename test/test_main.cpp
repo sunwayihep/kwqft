@@ -222,8 +222,8 @@ template <typename Real> bool test_matrix() {
   Matrix Bm;
   for (int i = 0; i < NCOLORS; ++i) {
     for (int j = 0; j < NCOLORS; ++j) {
-      Bm.e[i][j] = Complex<Real>(Real(0.1) * (i + 2 * j + 1),
-                                 Real(0.05) * (i - j));
+      Bm.e[i][j] =
+          Complex<Real>(Real(0.1) * (i + 2 * j + 1), Real(0.05) * (i - j));
     }
   }
   auto max_abs = [](const Matrix &X, const Matrix &Y) {
@@ -354,8 +354,8 @@ template <typename Real> bool test_gauge_io_roundtrip() {
     printf("  FAILED: plaquette mismatch after save/load\n");
     printf("    before save   = %f\n", static_cast<double>(plaq_before));
     printf("    after reload  = %f\n", static_cast<double>(plaq_after));
-    printf("    |difference|  = %e (tolerance %e)\n",
-           static_cast<double>(diff), static_cast<double>(tol));
+    printf("    |difference|  = %e (tolerance %e)\n", static_cast<double>(diff),
+           static_cast<double>(tol));
     return false;
   }
 
@@ -548,8 +548,8 @@ bool test_site_simd_vs_scalar_case(const std::vector<int> &lattice,
             for (int i = 0; i < NCOLORS; ++i) {
               for (int j = 0; j < NCOLORS; ++j) {
                 const Complex<Real> v(sv.e[i][j].x[l], sv.e[i][j].y[l]);
-                staple_err = std::max(
-                    staple_err, static_cast<double>(abs(v - ss.e[i][j])));
+                staple_err = std::max(staple_err,
+                                      static_cast<double>(abs(v - ss.e[i][j])));
               }
             }
           }
@@ -566,8 +566,8 @@ bool test_site_simd_vs_scalar_case(const std::vector<int> &lattice,
         b = init;
         for (int64_t s = 0; s + W <= half; s += W) {
           const int64_t *id = &sites[s];
-          heatBathUpdateBatch<Real, Simd>(a.data(), stride, nullptr, id,
-                                          parity, mu, params, atype, 1.5,
+          heatBathUpdateBatch<Real, Simd>(a.data(), stride, nullptr, id, parity,
+                                          mu, params, atype, 1.5,
                                           rng_a.getPool());
           for (int l = 0; l < W; ++l) {
             heatBathUpdateSite<Real>(b.data(), stride, nullptr, id[l], parity,
@@ -639,8 +639,7 @@ template <typename Real> bool test_site_simd_vs_scalar() {
   ok = test_site_simd_vs_scalar_case<Real>(contiguous, ArrayType::SOA) && ok;
   ok = test_site_simd_vs_scalar_case<Real>(row_cross, ArrayType::SOA) && ok;
   if constexpr (NCOLORS == 3) {
-    ok = test_site_simd_vs_scalar_case<Real>(row_cross, ArrayType::SOA12) &&
-         ok;
+    ok = test_site_simd_vs_scalar_case<Real>(row_cross, ArrayType::SOA12) && ok;
   }
   printf(ok ? "  PASSED\n" : "  FAILED\n");
   return ok;
@@ -693,7 +692,7 @@ template <typename Real> bool test_mpi_gauge_io_roundtrip() {
   gauge.initCold();
 
   RandomGenerator rng(424242u + static_cast<unsigned int>(rank),
-                    params.half_volume);
+                      params.half_volume);
   HeatBath<Real> heatbath(gauge, rng, params);
   Reunitarize<Real> reunitarize(gauge, params);
   Plaquette<Real> plaq(gauge, params);
@@ -791,7 +790,8 @@ template <typename Real> bool test_mpi_polyakov_time_split() {
   bool ok = std::abs(cold_abs - Real(1)) <= cold_tol;
 
   if (ok) {
-    RandomGenerator rng(777u + static_cast<unsigned int>(rank), params.half_volume);
+    RandomGenerator rng(777u + static_cast<unsigned int>(rank),
+                        params.half_volume);
     HeatBath<Real> heatbath(gauge, rng, params);
     for (int i = 0; i < 5; ++i) {
       heatbath.run();
@@ -868,7 +868,8 @@ template <typename Real> bool test_mpi_shift_heatbath() {
   plaq.run();
   const Real cold_plaq = plaq.value();
 
-  RandomGenerator rng(13579u + static_cast<unsigned int>(rank), params.half_volume);
+  RandomGenerator rng(13579u + static_cast<unsigned int>(rank),
+                      params.half_volume);
   HeatBath<Real> heatbath(gauge, rng, params);
   for (int i = 0; i < 3; ++i) {
     heatbath.run();

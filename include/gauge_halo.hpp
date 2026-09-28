@@ -31,8 +31,8 @@
 #include "complex.hpp"
 #include "constants.hpp"
 #include "gauge_load_save.hpp"
-#include "neighbor_access.hpp"
 #include "kwqft_common.hpp"
+#include "neighbor_access.hpp"
 #include <memory>
 #include <vector>
 

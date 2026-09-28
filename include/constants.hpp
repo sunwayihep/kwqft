@@ -20,27 +20,29 @@ namespace kwqft {
  * Uses int64_t for volume-related fields to support large lattices
  */
 struct LatticeParams {
-  int grid[NDIMS];            // Lattice dimensions (per-dimension, int is enough)
+  int grid[NDIMS]; // Lattice dimensions (per-dimension, int is enough)
   int grid_with_ghost[NDIMS]; // Lattice dimensions including ghost zones
   int border[NDIMS];          // Border size for multi-GPU
 
   // Volume-related fields use int64_t to support high-dimensional lattices
-  int64_t volume;                 // Total volume
-  int64_t half_volume;            // Half volume (for even/odd)
-  int64_t volume_with_ghost;      // Volume including ghost zones
+  int64_t volume;            // Total volume
+  int64_t half_volume;       // Half volume (for even/odd)
+  int64_t volume_with_ghost; // Volume including ghost zones
   int64_t half_volume_with_ghost;
   int64_t size;    // Total number of links = volume * NDIMS
   int64_t kstride; // Stride for k = nx * ny
-  int64_t tstride; // Stride for t = nx * ny * nz (or product of first NDIMS-1 dims)
+  int64_t
+      tstride; // Stride for t = nx * ny * nz (or product of first NDIMS-1 dims)
 
-  double beta;         // Gauge coupling
-  double beta_over_nc; // beta / Nc
-  double xi0;          // Bare anisotropy, xi0=1 for isotropic
+  double beta;                 // Gauge coupling
+  double beta_over_nc;         // beta / Nc
+  double xi0;                  // Bare anisotropy, xi0=1 for isotropic
   double coeffs[NDIMS][NDIMS]; // Anisotropic plaquette coefficients
 
   bool use_texture; // Use texture memory (for CUDA)
 
-  /// Domain decomposition (MPI): when false, grid[] is the full lattice (periodic).
+  /// Domain decomposition (MPI): when false, grid[] is the full lattice
+  /// (periodic).
   bool mpi{false};
   int global_grid[NDIMS]; // Global lattice (user-specified sizes)
   int proc_grid[NDIMS];   // MPI process grid (1 if not using MPI)
@@ -74,7 +76,8 @@ struct LatticeParams {
       KWQFT_ERROR("Lattice size vector must have NDIMS elements");
     }
     if (lattice_size[0] % 2 != 0) {
-      KWQFT_ERROR("First lattice dimension (grid[0]) must be even for even/odd ordering");
+      KWQFT_ERROR("First lattice dimension (grid[0]) must be even for even/odd "
+                  "ordering");
     }
 
     volume = 1;

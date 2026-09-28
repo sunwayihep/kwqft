@@ -1,6 +1,7 @@
 /**
  * @file overrelax.cpp
- * @brief Overrelaxation instantiation, split from monte.cpp for HIP compile memory.
+ * @brief Overrelaxation instantiation, split from monte.cpp for HIP compile
+ * memory.
  */
 
 #include "monte.hpp"

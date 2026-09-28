@@ -204,9 +204,8 @@ void GaugeHaloBuffers<Real>::collect_stale_chunks(
     for (int dir = 0; dir < NDIMS; ++dir) {
       const int nblk = split ? 2 : 1;
       for (int b = 0; b < nblk; ++b) {
-        const bool stale =
-            split ? !valid_[2 * dir + b]
-                  : (!valid_[2 * dir] || !valid_[2 * dir + 1]);
+        const bool stale = split ? !valid_[2 * dir + b]
+                                 : (!valid_[2 * dir] || !valid_[2 * dir + 1]);
         const int64_t off =
             (static_cast<int64_t>(dir) * hv + static_cast<int64_t>(b) * block) *
             me;
@@ -216,8 +215,8 @@ void GaugeHaloBuffers<Real>::collect_stale_chunks(
             cur_n += n;
           } else {
             if (open) {
-              chunks.push_back(Chunk{code, cur_off, cur_n,
-                                     2000 + code * 32 + nchunk++});
+              chunks.push_back(
+                  Chunk{code, cur_off, cur_n, 2000 + code * 32 + nchunk++});
             }
             cur_off = off;
             cur_n = n;
@@ -227,7 +226,8 @@ void GaugeHaloBuffers<Real>::collect_stale_chunks(
       }
     }
     if (open) {
-      chunks.push_back(Chunk{code, cur_off, cur_n, 2000 + code * 32 + nchunk++});
+      chunks.push_back(
+          Chunk{code, cur_off, cur_n, 2000 + code * 32 + nchunk++});
     }
   }
 }
@@ -255,8 +255,8 @@ void GaugeHaloBuffers<Real>::pack_stale(const ComplexT *gauge_soa,
       if (split) {
         for (int b = 0; b < 2; ++b) {
           if (!valid_[2 * dir + b]) {
-            items[nitems++] = HaloPackItem{
-                dir, static_cast<int64_t>(b) * (hv / 2), hv / 2};
+            items[nitems++] =
+                HaloPackItem{dir, static_cast<int64_t>(b) * (hv / 2), hv / 2};
           }
         }
       } else if (!valid_[2 * dir] || !valid_[2 * dir + 1]) {
@@ -285,8 +285,7 @@ void GaugeHaloBuffers<Real>::pack_stale(const ComplexT *gauge_soa,
           int x[NDIMS];
           halo_slot_to_coords(offa.v, sdim, hv, slot, x, par);
           const int64_t idx_eo = coords_to_eo_idx(x, par);
-          const int64_t base =
-              (static_cast<int64_t>(pi.dir) * hv + slot) * me;
+          const int64_t base = (static_cast<int64_t>(pi.dir) * hv + slot) * me;
           const int64_t src =
               idx_eo + static_cast<int64_t>(pi.dir) * par.volume;
           for (int ij = 0; ij < NCOLORS * NCOLORS; ++ij) {
@@ -337,7 +336,8 @@ void GaugeHaloBuffers<Real>::post_chunks(const std::vector<Chunk> &chunks) {
     MPI_Cart_rank(comm, src_coords, &src_rank);
     MPI_Cart_rank(comm, dst_coords, &dst_rank);
 
-    const int64_t byte_off = c.elem_off * static_cast<int64_t>(sizeof(ComplexT));
+    const int64_t byte_off =
+        c.elem_off * static_cast<int64_t>(sizeof(ComplexT));
     const int nbytes = static_cast<int>(c.nelem * sizeof(ComplexT));
 
     char *send_base;
