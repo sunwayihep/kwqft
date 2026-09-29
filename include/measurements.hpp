@@ -145,16 +145,16 @@ public:
   double time() const { return time_; }
 
   /**
-   * @brief Calculate number of floating point operations
+   * @brief Calculate number of floating point operations.
    *
-   * 20 N^3 real flops per plaquette plane. D=4 has six planes, which
-   * recovers the previous factor of 120 N^3 per site.
+   * Each of the D(D-1)/2 planes is three SU(N) products and a real trace.
    */
   long long flop() const {
+    const long long n = NCOLORS;
     const long long planes =
         static_cast<long long>(NDIMS) * (NDIMS - 1) / 2;
-    return static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 20LL *
-           planes * params_.volume;
+    const long long perPlane = 3 * sun_product_flops() + (n - 1);
+    return perPlane * planes * params_.volume;
   }
 
   /**
@@ -492,13 +492,11 @@ public:
     for (int i = 0; i < NDIMS - 1; ++i) {
       spatialVolume *= params_.grid[i];
     }
-#if (NCOLORS == 3)
-    return (4LL + 198LL * nt) * spatialVolume;
-#else
-    return ((NCOLORS - 1) * 2LL +
-            static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 8LL * nt) *
+    // nt products with the temporal links, then the real and imaginary parts
+    // of the trace.
+    return (static_cast<long long>(nt) * sun_product_flops() +
+            2LL * (NCOLORS - 1)) *
            spatialVolume;
-#endif
   }
 
   /**
@@ -686,21 +684,21 @@ public:
    * @brief Calculate number of floating point operations
    */
   long long flop() const {
-#if (NCOLORS == 3)
-    // For SOA format, getNumFlop returns 0, so just use 126LL for reunit ops
-    long long flopPerLink = 126LL;
-#else
-    // General Gram-Schmidt complexity
-    unsigned int tmpGs = 0;
-    unsigned int tmpDet = 0;
-    for (int i = 0; i < NCOLORS; i++) {
-      tmpGs += i + 1;
-      tmpDet += i;
+    const long long n = NCOLORS;
+    long long flopPerLink = 0;
+    if (n == 3) {
+      // Row norms, one conjugated dot product, one axpy, and the cross
+      // product that rebuilds the third row.
+      flopPerLink = 132;
+    } else {
+      // Row r is orthogonalized against r previous rows, then normalized.
+      // A conjugated dot is N complex multiplies, N conjugations and (N-1)
+      // complex additions; the axpy is N complex multiplies and N additions.
+      for (long long row = 0; row < n; ++row) {
+        flopPerLink += row * ((9 * n - 2) + 8 * n);
+        flopPerLink += 6 * n + 1;
+      }
     }
-    tmpDet = tmpGs * NCOLORS * 8 + tmpDet * (NCOLORS * 8 + 11);
-    tmpGs = tmpGs * NCOLORS * 16 + NCOLORS * (NCOLORS * 6 + 2);
-    long long flopPerLink = static_cast<long long>(tmpGs + tmpDet);
-#endif
     return flopPerLink * params_.size;
   }
 

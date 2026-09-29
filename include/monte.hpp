@@ -536,16 +536,9 @@ public:
    */
   long long flop() const {
     // Staple scales with D; the Cabibbo--Marinari update of one link does not.
-    const long long stapleFlop = staple_flops_per_link();
-#if (NCOLORS == 3)
-    const long long phbFlop = 801LL; // Pseudo-heatbath update
-#else
-    const long long phbFlop =
-        NCOLORS * NCOLORS * NCOLORS +
-        (NCOLORS * (NCOLORS - 1) / 2) * (46LL + 48LL + 56LL * NCOLORS);
-#endif
+    const long long perLink = staple_flops_per_link() + heatbath_algebra_flops();
     // Factor of 2*NDIMS = 2 parities * NDIMS directions
-    return (stapleFlop + phbFlop) * size_ * 2 * NDIMS;
+    return perLink * size_ * 2 * NDIMS;
   }
 
   /**
@@ -676,16 +669,10 @@ public:
    * @brief Calculate number of floating point operations
    */
   long long flop() const {
-    const long long stapleFlop = staple_flops_per_link();
-#if (NCOLORS == 3)
-    const long long ovrFlop = 801LL; // Similar to heatbath without RNG
-#else
-    const long long ovrFlop =
-        NCOLORS * NCOLORS * NCOLORS +
-        (NCOLORS * (NCOLORS - 1) / 2) * (46LL + 48LL + 56LL * NCOLORS);
-#endif
+    const long long perLink =
+        staple_flops_per_link() + overrelax_algebra_flops();
     // Factor of 2*NDIMS = 2 parities * NDIMS directions
-    return (stapleFlop + ovrFlop) * params_.half_volume * 2 * NDIMS;
+    return perLink * params_.half_volume * 2 * NDIMS;
   }
 
   /**
