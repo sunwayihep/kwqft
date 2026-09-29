@@ -535,33 +535,31 @@ public:
    * @brief Calculate number of floating point operations
    */
   long long flop() const {
+    // Staple scales with D; the Cabibbo--Marinari update of one link does not.
+    const long long stapleFlop = staple_flops_per_link();
 #if (NCOLORS == 3)
-    long long stapleFlop = 2268LL; // Staple calculation
-    long long phbFlop = 801LL;     // Pseudo-heatbath update
-    long long threadFlop = (stapleFlop + phbFlop) * size_;
+    const long long phbFlop = 801LL; // Pseudo-heatbath update
 #else
-    long long phbFlop =
+    const long long phbFlop =
         NCOLORS * NCOLORS * NCOLORS +
         (NCOLORS * (NCOLORS - 1) / 2) * (46LL + 48LL + 56LL * NCOLORS);
-    long long stapleFlop =
-        static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 84LL;
-    long long threadFlop = (stapleFlop + phbFlop) * size_;
 #endif
     // Factor of 2*NDIMS = 2 parities * NDIMS directions
-    return threadFlop * 2 * NDIMS;
+    return (stapleFlop + phbFlop) * size_ * 2 * NDIMS;
   }
 
   /**
    * @brief Calculate bytes read/written
    */
   long long bytes() const {
-    // Read: 7 links for staple + 1 link to update + RNG state
-    // Write: 1 link + RNG state
+    // 6(D-1) staple links plus load and store of the updated link, and two
+    // RNG-state accesses (acquire and return).
     int numParams = gauge_num_params(gauge_.type());
     // RNG state size: ~48 bytes (similar to cuRNGState)
     long long rngStateSize = 48LL;
-    long long bytesPerSite =
-        (20LL * numParams * sizeof(Real) + 2LL * rngStateSize);
+    long long bytesPerSite = (staple_links_per_update() * numParams *
+                                  static_cast<long long>(sizeof(Real)) +
+                              2LL * rngStateSize);
     return bytesPerSite * size_ * 2 * NDIMS;
   }
 
@@ -678,20 +676,16 @@ public:
    * @brief Calculate number of floating point operations
    */
   long long flop() const {
+    const long long stapleFlop = staple_flops_per_link();
 #if (NCOLORS == 3)
-    long long stapleFlop = 2268LL;
-    long long ovrFlop = 801LL; // Similar to heatbath without RNG
-    long long threadFlop = (stapleFlop + ovrFlop) * params_.half_volume;
+    const long long ovrFlop = 801LL; // Similar to heatbath without RNG
 #else
-    long long ovrFlop =
+    const long long ovrFlop =
         NCOLORS * NCOLORS * NCOLORS +
         (NCOLORS * (NCOLORS - 1) / 2) * (46LL + 48LL + 56LL * NCOLORS);
-    long long stapleFlop =
-        static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 84LL;
-    long long threadFlop = (stapleFlop + ovrFlop) * params_.half_volume;
 #endif
     // Factor of 2*NDIMS = 2 parities * NDIMS directions
-    return threadFlop * 2 * NDIMS;
+    return (stapleFlop + ovrFlop) * params_.half_volume * 2 * NDIMS;
   }
 
   /**
@@ -699,7 +693,9 @@ public:
    */
   long long bytes() const {
     int numParams = gauge_num_params(gauge_.type());
-    long long bytesPerSite = 20LL * numParams * sizeof(Real);
+    // Same link traffic as the heatbath, without the RNG state.
+    long long bytesPerSite = staple_links_per_update() * numParams *
+                             static_cast<long long>(sizeof(Real));
     return bytesPerSite * params_.half_volume * 2 * NDIMS;
   }
 

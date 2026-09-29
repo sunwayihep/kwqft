@@ -6,6 +6,8 @@
 #ifndef KWQFT_PERF_STATS_HPP
 #define KWQFT_PERF_STATS_HPP
 
+#include "kwqft_common.hpp"
+
 #ifdef KWQFT_USE_MPI
 #include <mpi.h>
 #endif
@@ -65,6 +67,27 @@ inline PerfReport make_perf_report(long long local_flop, long long local_bytes,
         static_cast<double>(bytes) / (time * static_cast<double>(1LL << 30));
   }
   return report;
+}
+
+/**
+ * @brief Flops to build one Wilson staple.
+ *
+ * Each of the 2(D-1) legs is two SU(N) products, counted at 7 N^3 real
+ * flops per product. This is 84 N^3 at D=4 (2268 for SU(3)).
+ */
+inline long long staple_flops_per_link() {
+  return 28LL * static_cast<long long>(NDIMS - 1) * NCOLORS * NCOLORS *
+         NCOLORS;
+}
+
+/**
+ * @brief Link matrices moved by one link update.
+ *
+ * The staple reads 6(D-1) neighboring links; the updated link is loaded
+ * and stored. This is 20 at D=4.
+ */
+inline long long staple_links_per_update() {
+  return 6LL * static_cast<long long>(NDIMS - 1) + 2LL;
 }
 
 } // namespace kwqft

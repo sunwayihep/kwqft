@@ -147,20 +147,29 @@ public:
   /**
    * @brief Calculate number of floating point operations
    *
-   * The factor 120 includes all plaquette directions per site
+   * 20 N^3 real flops per plaquette plane. D=4 has six planes, which
+   * recovers the previous factor of 120 N^3 per site.
    */
   long long flop() const {
-    return static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 120LL *
-           params_.volume;
+    const long long planes =
+        static_cast<long long>(NDIMS) * (NDIMS - 1) / 2;
+    return static_cast<long long>(NCOLORS) * NCOLORS * NCOLORS * 20LL *
+           planes * params_.volume;
   }
 
   /**
    * @brief Calculate bytes read
    *
+   * The D=4 count is (22*numParams+4) reals per site for six planes.
+   * Scale that cost by the number of planes D(D-1)/2.
    */
   long long bytes() const {
     int numParams = gauge_num_params(gauge_.type());
-    return (22LL * numParams + 4LL) * params_.volume * sizeof(Real);
+    const long long planes =
+        static_cast<long long>(NDIMS) * (NDIMS - 1) / 2;
+    const long long reals4d = 22LL * numParams + 4LL;
+    return reals4d * planes * params_.volume *
+           static_cast<long long>(sizeof(Real)) / 6;
   }
 
   double flops() const {
