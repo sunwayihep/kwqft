@@ -29,6 +29,18 @@ option(KWQFT_MPI_DEVICE_AWARE
 # Lattice parameters (can be overridden at compile time)
 set(KWQFT_NCOLORS "3" CACHE STRING "Number of colors for SU(N)")
 set(KWQFT_NDIMS "4" CACHE STRING "Number of spacetime dimensions")
+# Precision of the heatbath executable. The library stays templated on Real.
+set(KWQFT_PRECISION "double" CACHE STRING
+    "Floating-point precision of the heatbath executable: double or single")
+set_property(CACHE KWQFT_PRECISION PROPERTY STRINGS double single)
+if(KWQFT_PRECISION STREQUAL "double")
+    set(KWQFT_REAL_TYPE "double")
+elseif(KWQFT_PRECISION STREQUAL "single")
+    set(KWQFT_REAL_TYPE "float")
+else()
+    message(FATAL_ERROR
+        "KWQFT_PRECISION must be \"double\" or \"single\" (got \"${KWQFT_PRECISION}\")")
+endif()
 
 # Kokkos::LaunchBounds<MaxThreads, MinBlocks> for device kernels; 0 = backend
 # default. The HIP backend launches 1024-thread blocks regardless of register
@@ -184,6 +196,7 @@ endif()
 # Main executable
 add_executable(heatbath main/heatbath_main.cpp)
 target_link_libraries(heatbath kwqft)
+target_compile_definitions(heatbath PRIVATE KWQFT_REAL_TYPE=${KWQFT_REAL_TYPE})
 
 # Test executable
 add_executable(test_kwqft test/test_main.cpp)
@@ -202,6 +215,7 @@ message(STATUS "===========================================")
 message(STATUS "KWQFT Configuration:")
 message(STATUS "  NCOLORS: ${KWQFT_NCOLORS}")
 message(STATUS "  NDIMS: ${KWQFT_NDIMS}")
+message(STATUS "  Precision: ${KWQFT_PRECISION}")
 message(STATUS "  LaunchBounds: MAX_THREADS_PER_BLOCK=${KWQFT_MAX_THREADS_PER_BLOCK} MIN_BLOCKS_PER_SM=${KWQFT_MIN_BLOCKS_PER_SM} (0 = backend default)")
 message(STATUS "  OpenMP: ${KWQFT_ENABLE_OPENMP}")
 if(KWQFT_ENABLE_OPENMP)

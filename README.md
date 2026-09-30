@@ -127,6 +127,7 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 | `KWQFT_USE_MPI` | Enable MPI build and `-geom` domain decomposition | OFF |
 | `KWQFT_NCOLORS` | N value for SU(N) | 3 |
 | `KWQFT_NDIMS` | Spacetime dimensions | 4 |
+| `KWQFT_PRECISION` | Precision of the `heatbath` executable: `double` or `single` | `double` |
 
 ## Running
 

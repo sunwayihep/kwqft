@@ -23,7 +23,12 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
+
+#ifndef KWQFT_REAL_TYPE
+#define KWQFT_REAL_TYPE double
+#endif
 
 using namespace kwqft;
 
@@ -316,7 +321,7 @@ void runHeatbath(int ntraj, int nhb, int novr, int nsave) {
           save_prefix + "_cfg_" + std::to_string(traj) + ".bin";
       // File format is always full SU(N) matrices (SOA12 reconstructed on
       // save).
-      saveGaugeBinary<double, double>(gauge, filename, false);
+      saveGaugeBinary<Real, Real>(gauge, filename, false);
     }
   }
 
@@ -393,6 +398,8 @@ int main(int argc, char *argv[]) {
 
   if (mpiCommRank() == 0) {
     printf("Starting SU(%d) heatbath simulation\n", NCOLORS);
+    printf("Precision: %s\n",
+           std::is_same_v<KWQFT_REAL_TYPE, float> ? "single" : "double");
     printf("Beta: %f\n", beta);
     printf("Number of trajectories: %d\n", ntraj);
     printf("Heatbath sweeps per trajectory (-nhb): %d\n", nhb);
@@ -402,7 +409,7 @@ int main(int argc, char *argv[]) {
     printf("\n");
   }
 
-  runHeatbath<double>(ntraj, nhb, novr, nsave);
+  runHeatbath<KWQFT_REAL_TYPE>(ntraj, nhb, novr, nsave);
 
   kwqft::finalize();
   return 0;
