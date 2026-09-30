@@ -313,8 +313,6 @@ public:
     const int t_coord = params.mpi ? params.coord[tDir] : 0;
     const bool mpi_time_split = params.mpi && t_nproc > 1;
 #else
-    const int t_nproc = 1;
-    const int t_coord = 0;
     const bool mpi_time_split = false;
 #endif
 
