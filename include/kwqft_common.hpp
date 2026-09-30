@@ -41,13 +41,13 @@
 namespace kwqft {
 
 /// Scalar element type of \p T: T itself, or T::value_type for SIMD packs.
-template <typename T, typename = void> struct scalar_of {
-  using type = T;
+template <typename T, typename = void> struct ScalarOf {
+  using Type = T;
 };
-template <typename T> struct scalar_of<T, std::void_t<typename T::value_type>> {
-  using type = typename T::value_type;
+template <typename T> struct ScalarOf<T, std::void_t<typename T::value_type>> {
+  using Type = typename T::value_type;
 };
-template <typename T> using scalar_of_t = typename scalar_of<T>::type;
+template <typename T> using ScalarOfT = typename ScalarOf<T>::Type;
 
 //=============================================================================
 // Configuration macros
@@ -126,21 +126,21 @@ using ScratchMemSpace = typename DefaultExecSpace::scratch_memory_space;
 #define KWQFT_MIN_BLOCKS_PER_SM 0
 #endif
 
-using launch_bounds =
+using LaunchBounds =
     Kokkos::LaunchBounds<KWQFT_MAX_THREADS_PER_BLOCK, KWQFT_MIN_BLOCKS_PER_SM>;
 
 // Range policy for parallel loops (use this instead of a bare RangePolicy)
-using range_policy = Kokkos::RangePolicy<DefaultExecSpace, launch_bounds>;
-using host_range_policy = Kokkos::RangePolicy<HostExecSpace>;
+using RangePolicy = Kokkos::RangePolicy<DefaultExecSpace, LaunchBounds>;
+using HostRangePolicy = Kokkos::RangePolicy<HostExecSpace>;
 
 // Team policy for hierarchical parallelism
-using team_policy = Kokkos::TeamPolicy<DefaultExecSpace, launch_bounds>;
-using team_member = typename team_policy::member_type;
+using TeamPolicy = Kokkos::TeamPolicy<DefaultExecSpace, LaunchBounds>;
+using TeamMember = typename TeamPolicy::member_type;
 
 // MDRange policy for multi-dimensional parallel loops
 template <int Rank>
-using md_range_policy =
-    Kokkos::MDRangePolicy<DefaultExecSpace, Kokkos::Rank<Rank>, launch_bounds>;
+using MdRangePolicy =
+    Kokkos::MDRangePolicy<DefaultExecSpace, Kokkos::Rank<Rank>, LaunchBounds>;
 
 //=============================================================================
 // View type aliases
@@ -198,7 +198,7 @@ template <typename T> KOKKOS_INLINE_FUNCTION T absVal(T x) {
 // Memory alignment for optimal performance
 //=============================================================================
 
-constexpr size_t KWQFT_ALIGNMENT = 64;
+constexpr size_t kwqft_alignment = 64;
 
 //=============================================================================
 // Error handling

@@ -19,7 +19,7 @@
 
 namespace kwqft {
 
-constexpr int t_dir() { return NDIMS - 1; }
+constexpr int tDir() { return NDIMS - 1; }
 
 /**
  * @brief Wilson staple at one EO site via lazy \c shift() views.
@@ -33,12 +33,12 @@ constexpr int t_dir() { return NDIMS - 1; }
  */
 template <typename Real>
 KWQFT_INLINE_FUNCTION MatrixSun<Real, NCOLORS>
-calculateStapleLazy(const Complex<Real> *gaugePtr, int64_t soa_stride,
+calculateStapleLazy(const Complex<Real> *gauge_ptr, int64_t soa_stride,
                     const GaugeHaloDevice<Real> *halo, int64_t id, int oddbit,
                     int mu, const LatticeParams &params,
                     ArrayType atype = ArrayType::SOA) {
   using MatrixT = MatrixSun<Real, NCOLORS>;
-  const LatticeGaugeLinks<Real> u(gaugePtr, soa_stride, atype);
+  const LatticeGaugeLinks<Real> u(gauge_ptr, soa_stride, atype);
   const int64_t idx_eo = id + static_cast<int64_t>(oddbit) * params.half_volume;
 
   MatrixT staple = MatrixT::zero();
@@ -50,19 +50,19 @@ calculateStapleLazy(const Complex<Real> *gaugePtr, int64_t soa_stride,
     }
     const Real coeff = static_cast<Real>(params.coeffs[mu][nu]);
 
-    const LatticeColorMatrix<Real> U_mu_fwd_nu = shift(u[mu], FORWARD, nu);
-    const LatticeColorMatrix<Real> U_nu_fwd_mu = shift(u[nu], FORWARD, mu);
-    const LatticeColorMatrix<Real> U_nu_bwd_nu = shift(u[nu], BACKWARD, nu);
-    const LatticeColorMatrix<Real> U_mu_bwd_nu = shift(u[mu], BACKWARD, nu);
-    const LatticeColorMatrix<Real> U_nu_fwd_mu_bwd_nu =
-        shift(U_nu_fwd_mu, BACKWARD, nu);
+    const LatticeColorMatrix<Real> u_mu_fwd_nu = shift(u[mu], FORWARD, nu);
+    const LatticeColorMatrix<Real> u_nu_fwd_mu = shift(u[nu], FORWARD, mu);
+    const LatticeColorMatrix<Real> u_nu_bwd_nu = shift(u[nu], BACKWARD, nu);
+    const LatticeColorMatrix<Real> u_mu_bwd_nu = shift(u[mu], BACKWARD, nu);
+    const LatticeColorMatrix<Real> u_nu_fwd_mu_bwd_nu =
+        shift(u_nu_fwd_mu, BACKWARD, nu);
 
     // UP: U_ν(x) U_μ(x+ν) U_ν†(x+μ)
     loadLatticeColorMatrix(u[nu], idx_eo, params, link, halo);
-    loadLatticeColorMatrix(U_mu_fwd_nu, idx_eo, params, buf, halo);
+    loadLatticeColorMatrix(u_mu_fwd_nu, idx_eo, params, buf, halo);
     link *= buf;
-    loadLatticeColorMatrix(U_nu_fwd_mu, idx_eo, params, buf, halo);
-    link = UUDagger(link, buf);
+    loadLatticeColorMatrix(u_nu_fwd_mu, idx_eo, params, buf, halo);
+    link = uuDagger(link, buf);
     if (coeff != Real(1)) {
       link *= coeff;
     }
@@ -70,10 +70,10 @@ calculateStapleLazy(const Complex<Real> *gaugePtr, int64_t soa_stride,
 
     // DOWN: U_ν†(x−ν) U_μ(x−ν) U_ν(x−ν+μ)
     // adj() view: the dagger is folded into the load, no extra transpose.
-    loadLatticeColorMatrix(adj(U_nu_bwd_nu), idx_eo, params, link, halo);
-    loadLatticeColorMatrix(U_mu_bwd_nu, idx_eo, params, buf, halo);
+    loadLatticeColorMatrix(adj(u_nu_bwd_nu), idx_eo, params, link, halo);
+    loadLatticeColorMatrix(u_mu_bwd_nu, idx_eo, params, buf, halo);
     link *= buf;
-    loadLatticeColorMatrix(U_nu_fwd_mu_bwd_nu, idx_eo, params, buf, halo);
+    loadLatticeColorMatrix(u_nu_fwd_mu_bwd_nu, idx_eo, params, buf, halo);
     link *= buf;
     if (coeff != Real(1)) {
       link *= coeff;
@@ -99,7 +99,7 @@ KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION void loadLatticeColorMatrixBatch(
   constexpr int width = static_cast<int>(Simd::size());
   GaugeLinkRef<Real> ref[width];
   for (int lane = 0; lane < width; ++lane) {
-    ref[lane] = field.resolve_at_coords(idx_eo[lane], x[lane], p, halo);
+    ref[lane] = field.resolveAtCoords(idx_eo[lane], x[lane], p, halo);
   }
   loadMatrixBatch<Real, Simd>(ref, field.adjoint(), U);
 }
@@ -107,18 +107,18 @@ KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION void loadLatticeColorMatrixBatch(
 /// \ref calculateStapleLazy for the W sites \p id[0..W) of one SIMD batch.
 template <typename Real, typename Simd>
 KOKKOS_IMPL_HOST_FORCEINLINE_FUNCTION MatrixSun<Simd, NCOLORS>
-calculateStapleLazyBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
+calculateStapleLazyBatch(const Complex<Real> *gauge_ptr, int64_t soa_stride,
                          const GaugeHaloDevice<Real> *halo, const int64_t *id,
                          int oddbit, int mu, const LatticeParams &params,
                          ArrayType atype = ArrayType::SOA) {
   using MatrixV = MatrixSun<Simd, NCOLORS>;
   constexpr int width = static_cast<int>(Simd::size());
-  const LatticeGaugeLinks<Real> u(gaugePtr, soa_stride, atype);
+  const LatticeGaugeLinks<Real> u(gauge_ptr, soa_stride, atype);
   int64_t idx_eo[width];
   int x[width][NDIMS];
   for (int lane = 0; lane < width; ++lane) {
     idx_eo[lane] = id[lane] + static_cast<int64_t>(oddbit) * params.half_volume;
-    eo_to_coords(id[lane], oddbit, x[lane], params);
+    eoToCoords(id[lane], oddbit, x[lane], params);
   }
 
   MatrixV staple = MatrixV::zero();
@@ -128,32 +128,32 @@ calculateStapleLazyBatch(const Complex<Real> *gaugePtr, int64_t soa_stride,
       continue;
     }
     const Real coeff = static_cast<Real>(params.coeffs[mu][nu]);
-    const LatticeColorMatrix<Real> U_mu_fwd_nu = shift(u[mu], FORWARD, nu);
-    const LatticeColorMatrix<Real> U_nu_fwd_mu = shift(u[nu], FORWARD, mu);
-    const LatticeColorMatrix<Real> U_nu_bwd_nu = shift(u[nu], BACKWARD, nu);
-    const LatticeColorMatrix<Real> U_mu_bwd_nu = shift(u[mu], BACKWARD, nu);
-    const LatticeColorMatrix<Real> U_nu_fwd_mu_bwd_nu =
-        shift(U_nu_fwd_mu, BACKWARD, nu);
+    const LatticeColorMatrix<Real> u_mu_fwd_nu = shift(u[mu], FORWARD, nu);
+    const LatticeColorMatrix<Real> u_nu_fwd_mu = shift(u[nu], FORWARD, mu);
+    const LatticeColorMatrix<Real> u_nu_bwd_nu = shift(u[nu], BACKWARD, nu);
+    const LatticeColorMatrix<Real> u_mu_bwd_nu = shift(u[mu], BACKWARD, nu);
+    const LatticeColorMatrix<Real> u_nu_fwd_mu_bwd_nu =
+        shift(u_nu_fwd_mu, BACKWARD, nu);
 
     loadLatticeColorMatrixBatch<Real, Simd>(u[nu], idx_eo, x, params, halo,
                                             link);
-    loadLatticeColorMatrixBatch<Real, Simd>(U_mu_fwd_nu, idx_eo, x, params,
+    loadLatticeColorMatrixBatch<Real, Simd>(u_mu_fwd_nu, idx_eo, x, params,
                                             halo, buf);
     link *= buf;
-    loadLatticeColorMatrixBatch<Real, Simd>(U_nu_fwd_mu, idx_eo, x, params,
+    loadLatticeColorMatrixBatch<Real, Simd>(u_nu_fwd_mu, idx_eo, x, params,
                                             halo, buf);
-    link = UUDagger(link, buf);
+    link = uuDagger(link, buf);
     if (coeff != Real(1)) {
       link *= Simd(coeff);
     }
     staple += link;
 
-    loadLatticeColorMatrixBatch<Real, Simd>(adj(U_nu_bwd_nu), idx_eo, x, params,
+    loadLatticeColorMatrixBatch<Real, Simd>(adj(u_nu_bwd_nu), idx_eo, x, params,
                                             halo, link);
-    loadLatticeColorMatrixBatch<Real, Simd>(U_mu_bwd_nu, idx_eo, x, params,
+    loadLatticeColorMatrixBatch<Real, Simd>(u_mu_bwd_nu, idx_eo, x, params,
                                             halo, buf);
     link *= buf;
-    loadLatticeColorMatrixBatch<Real, Simd>(U_nu_fwd_mu_bwd_nu, idx_eo, x,
+    loadLatticeColorMatrixBatch<Real, Simd>(u_nu_fwd_mu_bwd_nu, idx_eo, x,
                                             params, halo, buf);
     link *= buf;
     if (coeff != Real(1)) {

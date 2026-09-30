@@ -23,7 +23,7 @@ enum ShiftDirection : int {
 /**
  * @brief Shift an even/odd site index by ±e_mu (periodic on the local grid).
  */
-KOKKOS_INLINE_FUNCTION int64_t shift_eo(int64_t idx_eo, int mu, int lmu,
+KOKKOS_INLINE_FUNCTION int64_t shiftEo(int64_t idx_eo, int mu, int lmu,
                                         const LatticeParams &p) {
   const int oddbit = (idx_eo >= p.half_volume) ? 1 : 0;
   const int64_t id = idx_eo - static_cast<int64_t>(oddbit) * p.half_volume;
@@ -35,12 +35,12 @@ KOKKOS_INLINE_FUNCTION int64_t shift_eo(int64_t idx_eo, int mu, int lmu,
  */
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
-loadGaugeLinkSoa(const Complex<Real> *gaugePtr, int64_t idx_eo, int dir,
+loadGaugeLinkSoa(const Complex<Real> *gauge_ptr, int64_t idx_eo, int dir,
                  int64_t soa_stride, const LatticeParams &p,
-                 MatrixSun<Real, NCOLORS> &U,
+                 MatrixSun<Real, NCOLORS> &u,
                  ArrayType atype = ArrayType::SOA) {
   const int64_t base = idx_eo + static_cast<int64_t>(dir) * p.volume;
-  loadGaugeMatrix(gaugePtr, base, soa_stride, atype, U);
+  loadGaugeMatrix(gauge_ptr, base, soa_stride, atype, u);
 }
 
 /**
@@ -48,12 +48,12 @@ loadGaugeLinkSoa(const Complex<Real> *gaugePtr, int64_t idx_eo, int dir,
  */
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
-storeGaugeLinkSoa(Complex<Real> *gaugePtr, int64_t idx_eo, int dir,
+storeGaugeLinkSoa(Complex<Real> *gauge_ptr, int64_t idx_eo, int dir,
                   int64_t soa_stride, const LatticeParams &p,
-                  const MatrixSun<Real, NCOLORS> &U,
+                  const MatrixSun<Real, NCOLORS> &u,
                   ArrayType atype = ArrayType::SOA) {
   const int64_t base = idx_eo + static_cast<int64_t>(dir) * p.volume;
-  storeGaugeMatrix(gaugePtr, base, soa_stride, atype, U);
+  storeGaugeMatrix(gauge_ptr, base, soa_stride, atype, u);
 }
 
 } // namespace kwqft

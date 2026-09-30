@@ -21,7 +21,7 @@ namespace kwqft {
 namespace {
 
 template <typename Real, typename RealSaveConf>
-void cast_links_to_save(const MatrixSun<Real, NCOLORS> *src,
+void castLinksToSave(const MatrixSun<Real, NCOLORS> *src,
                         MatrixSun<RealSaveConf, NCOLORS> *dst, int ndirs) {
   for (int dir = 0; dir < ndirs; ++dir) {
     for (int i = 0; i < NCOLORS; ++i) {
@@ -35,20 +35,20 @@ void cast_links_to_save(const MatrixSun<Real, NCOLORS> *src,
   }
 }
 
-int global_grid_dim(const LatticeParams &p, int dim) {
+int globalGridDim(const LatticeParams &p, int dim) {
   return p.mpi ? p.global_grid[dim] : p.grid[dim];
 }
 
-int64_t global_volume_total(const LatticeParams &p) {
+int64_t globalVolumeTotal(const LatticeParams &p) {
   int64_t vol = 1;
   for (int d = 0; d < NDIMS; ++d) {
-    vol *= static_cast<int64_t>(global_grid_dim(p, d));
+    vol *= static_cast<int64_t>(globalGridDim(p, d));
   }
   return vol;
 }
 
 template <typename Real, typename RealSaveConf>
-void cast_links_from_file(const MatrixSun<RealSaveConf, NCOLORS> *src,
+void castLinksFromFile(const MatrixSun<RealSaveConf, NCOLORS> *src,
                           MatrixSun<Real, NCOLORS> *dst, int ndirs) {
   for (int dir = 0; dir < ndirs; ++dir) {
     for (int i = 0; i < NCOLORS; ++i) {
@@ -60,17 +60,10 @@ void cast_links_from_file(const MatrixSun<RealSaveConf, NCOLORS> *src,
   }
 }
 
-template <typename Real>
-void store_gauge_link_soa(Complex<Real> *gauge_ptr, int64_t idx_eo, int dir,
-                          int64_t soa_stride, const LatticeParams &p,
-                          const MatrixSun<Real, NCOLORS> &u, ArrayType atype) {
-  storeGaugeLinkSoa(gauge_ptr, idx_eo, dir, soa_stride, p, u, atype);
-}
-
-bool config_params_mismatch(const LatticeParams &p, const int grid_dim[NDIMS],
+bool configParamsMismatch(const LatticeParams &p, const int grid_dim[NDIMS],
                             double beta) {
   for (int d = 0; d < NDIMS; ++d) {
-    if (grid_dim[d] != global_grid_dim(p, d)) {
+    if (grid_dim[d] != globalGridDim(p, d)) {
       return true;
     }
   }
@@ -80,11 +73,11 @@ bool config_params_mismatch(const LatticeParams &p, const int grid_dim[NDIMS],
 } // namespace
 
 template <typename Real, typename RealSaveConf>
-void save_gauge_binary(const GaugeArray<Real> &gauge,
+void saveGaugeBinary(const GaugeArray<Real> &gauge,
                        const std::string &filename, bool withheader) {
   const LatticeParams &p = PARAMS::params;
 
-  if (!gauge.even_odd()) {
+  if (!gauge.evenOdd()) {
     KWQFT_ERROR("save_gauge_binary requires even/odd gauge storage");
     return;
   }
@@ -96,7 +89,7 @@ void save_gauge_binary(const GaugeArray<Real> &gauge,
   const int64_t soa_stride = gauge.size();
   const ArrayType atype = gauge.type();
 
-  const int rank = mpi_comm_rank();
+  const int rank = mpiCommRank();
   const int master = 0;
 
 #ifdef KWQFT_USE_MPI
@@ -115,7 +108,7 @@ void save_gauge_binary(const GaugeArray<Real> &gauge,
     if (withheader) {
       int grid_out[NDIMS];
       for (int d = 0; d < NDIMS; ++d) {
-        grid_out[d] = global_grid_dim(p, d);
+        grid_out[d] = globalGridDim(p, d);
       }
       fileout.write(reinterpret_cast<const char *>(grid_out),
                     sizeof(int) * NDIMS);
@@ -127,10 +120,10 @@ void save_gauge_binary(const GaugeArray<Real> &gauge,
 
   int global_grid[NDIMS];
   for (int d = 0; d < NDIMS; ++d) {
-    global_grid[d] = global_grid_dim(p, d);
+    global_grid[d] = globalGridDim(p, d);
   }
 
-  const int64_t global_volume = global_volume_total(p);
+  const int64_t global_volume = globalVolumeTotal(p);
   MatrixSun<Real, NCOLORS> links[NDIMS];
   MatrixSun<RealSaveConf, NCOLORS> links_save[NDIMS];
 
@@ -150,7 +143,7 @@ void save_gauge_binary(const GaugeArray<Real> &gauge,
       for (int d = 0; d < NDIMS; ++d) {
         cart[d] = gx[d] / p.grid[d];
       }
-      MPI_Cart_rank(kwqft_mpi_cart_comm(), cart, &owner_rank);
+      MPI_Cart_rank(kwqftMpiCartComm(), cart, &owner_rank);
     }
 #endif
 
@@ -159,7 +152,7 @@ void save_gauge_binary(const GaugeArray<Real> &gauge,
       for (int d = 0; d < NDIMS; ++d) {
         lx[d] = gx[d] % p.grid[d];
       }
-      const int64_t idx_eo = coords_to_eo_idx(lx, p);
+      const int64_t idx_eo = coordsToEoIdx(lx, p);
       for (int dir = 0; dir < NDIMS; ++dir) {
         // Reconstruct full SU(N) if storage is SOA12; file always stores Nc×Nc.
         loadGaugeLinkSoa(gauge_ptr, idx_eo, dir, soa_stride, p, links[dir],
@@ -184,7 +177,7 @@ void save_gauge_binary(const GaugeArray<Real> &gauge,
 
     if (rank == master) {
       if (sizeof(Real) != sizeof(RealSaveConf)) {
-        cast_links_to_save(links, links_save, NDIMS);
+        castLinksToSave(links, links_save, NDIMS);
         fileout.write(reinterpret_cast<const char *>(links_save),
                       link_save_bytes);
       } else {
@@ -204,16 +197,16 @@ void save_gauge_binary(const GaugeArray<Real> &gauge,
 }
 
 template <typename Real, typename RealSaveConf>
-void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
+void loadGaugeBinary(GaugeArray<Real> &gauge, const std::string &filename,
                        bool withheader) {
   const LatticeParams &p = PARAMS::params;
 
-  if (!gauge.even_odd()) {
+  if (!gauge.evenOdd()) {
     KWQFT_ERROR("load_gauge_binary requires even/odd gauge storage");
     return;
   }
 
-  const int rank = mpi_comm_rank();
+  const int rank = mpiCommRank();
   const int master = 0;
 
 #ifdef KWQFT_USE_MPI
@@ -227,9 +220,9 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
 
   int global_grid[NDIMS];
   for (int d = 0; d < NDIMS; ++d) {
-    global_grid[d] = global_grid_dim(p, d);
+    global_grid[d] = globalGridDim(p, d);
   }
-  const int64_t global_volume = global_volume_total(p);
+  const int64_t global_volume = globalVolumeTotal(p);
   const int64_t expected_body_bytes =
       global_volume *
       static_cast<int64_t>((sizeof(Real) != sizeof(RealSaveConf))
@@ -261,7 +254,7 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
         KWQFT_ERROR("Input lattice precision does not match file");
         return;
       }
-      if (config_params_mismatch(p, grid_dim, static_cast<double>(beta_file))) {
+      if (configParamsMismatch(p, grid_dim, static_cast<double>(beta_file))) {
         KWQFT_ERROR("Input lattice parameters do not match configuration file");
         return;
       }
@@ -295,7 +288,7 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
       for (int d = 0; d < NDIMS; ++d) {
         cart[d] = gx[d] / p.grid[d];
       }
-      MPI_Cart_rank(kwqft_mpi_cart_comm(), cart, &owner_rank);
+      MPI_Cart_rank(kwqftMpiCartComm(), cart, &owner_rank);
     }
 #endif
 
@@ -306,7 +299,7 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
           KWQFT_ERROR("ERROR: Unable to read configuration file");
           return;
         }
-        cast_links_from_file(links_file, links, NDIMS);
+        castLinksFromFile(links_file, links, NDIMS);
       } else {
         filein.read(reinterpret_cast<char *>(links), link_bytes);
         if (filein.fail()) {
@@ -336,10 +329,10 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
       for (int d = 0; d < NDIMS; ++d) {
         lx[d] = gx[d] % p.grid[d];
       }
-      const int64_t idx_eo = coords_to_eo_idx(lx, p);
+      const int64_t idx_eo = coordsToEoIdx(lx, p);
       for (int dir = 0; dir < NDIMS; ++dir) {
         // File has full SU(N); pack into SOA or SOA12 device storage.
-        store_gauge_link_soa(gauge_ptr, idx_eo, dir, soa_stride, p, links[dir],
+        storeGaugeLinkSoa(gauge_ptr, idx_eo, dir, soa_stride, p, links[dir],
                              atype);
       }
     }
@@ -352,25 +345,25 @@ void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
 
   Kokkos::deep_copy(gauge.getView(), host_view);
   Kokkos::fence();
-  gauge.invalidate_halo();
+  gauge.invalidateHalo();
 }
 
-template void save_gauge_binary<float, float>(const GaugeArray<float> &,
+template void saveGaugeBinary<float, float>(const GaugeArray<float> &,
                                               const std::string &, bool);
-template void save_gauge_binary<float, double>(const GaugeArray<float> &,
+template void saveGaugeBinary<float, double>(const GaugeArray<float> &,
                                                const std::string &, bool);
-template void save_gauge_binary<double, float>(const GaugeArray<double> &,
+template void saveGaugeBinary<double, float>(const GaugeArray<double> &,
                                                const std::string &, bool);
-template void save_gauge_binary<double, double>(const GaugeArray<double> &,
+template void saveGaugeBinary<double, double>(const GaugeArray<double> &,
                                                 const std::string &, bool);
 
-template void load_gauge_binary<float, float>(GaugeArray<float> &,
+template void loadGaugeBinary<float, float>(GaugeArray<float> &,
                                               const std::string &, bool);
-template void load_gauge_binary<float, double>(GaugeArray<float> &,
+template void loadGaugeBinary<float, double>(GaugeArray<float> &,
                                                const std::string &, bool);
-template void load_gauge_binary<double, float>(GaugeArray<double> &,
+template void loadGaugeBinary<double, float>(GaugeArray<double> &,
                                                const std::string &, bool);
-template void load_gauge_binary<double, double>(GaugeArray<double> &,
+template void loadGaugeBinary<double, double>(GaugeArray<double> &,
                                                 const std::string &, bool);
 
 } // namespace kwqft

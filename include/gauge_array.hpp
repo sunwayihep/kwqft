@@ -34,32 +34,32 @@ public:
   using ComplexT = Complex<Real>;
   using MatrixT = MatrixSun<Real, NCOLORS>;
   using ViewT = Kokkos::View<ComplexT *, DefaultMemSpace>;
-  using host_ViewT = typename ViewT::host_mirror_type;
+  using HostViewT = typename ViewT::host_mirror_type;
 
 private:
-  ViewT data_;              // Device data
-  host_ViewT hostData_;     // Host mirror
-  ArrayType arrayType_;     // Storage format
-  MemoryLocation location_; // Where primary data resides
-  bool evenOdd_;            // Even/odd ordering (required; must be true)
-  int64_t size_;            // Number of links (int64_t for large lattices)
-  bool allocated_;          // Whether memory is allocated
+  ViewT m_data;              // Device data
+  HostViewT host_data;     // Host mirror
+  ArrayType array_type;     // Storage format
+  MemoryLocation m_location; // Where primary data resides
+  bool even_odd;            // Even/odd ordering (required; must be true)
+  int64_t m_size;            // Number of links (int64_t for large lattices)
+  bool m_allocated;          // Whether memory is allocated
   /// MPI ghost buffers shared by every kernel operating on this field
   /// (created lazily; null when not domain-decomposed).
-  std::shared_ptr<GaugeHaloBuffers<Real>> halo_;
+  std::shared_ptr<GaugeHaloBuffers<Real>> m_halo;
 
 public:
   // Default constructor
   GaugeArray()
-      : arrayType_(ArrayType::SOA), location_(MemoryLocation::Device),
-        evenOdd_(false), size_(0), allocated_(false) {}
+      : array_type(ArrayType::SOA), m_location(MemoryLocation::Device),
+        even_odd(false), m_size(0), m_allocated(false) {}
 
   // Constructor with parameters
-  GaugeArray(ArrayType type, MemoryLocation loc, int64_t sizeIn,
-             bool evenOdd = true)
-      : arrayType_(type), location_(loc), evenOdd_(evenOdd), size_(sizeIn),
-        allocated_(false) {
-    allocate(sizeIn);
+  GaugeArray(ArrayType type, MemoryLocation loc, int64_t size_in,
+             bool even_odd = true)
+      : array_type(type), m_location(loc), even_odd(even_odd), m_size(size_in),
+        m_allocated(false) {
+    allocate(size_in);
   }
 
   // Destructor - Kokkos views handle cleanup automatically
@@ -80,34 +80,34 @@ public:
   //=========================================================================
 
   KOKKOS_INLINE_FUNCTION
-  ArrayType type() const { return arrayType_; }
+  ArrayType type() const { return array_type; }
 
   KOKKOS_INLINE_FUNCTION
-  MemoryLocation location() const { return location_; }
+  MemoryLocation location() const { return m_location; }
 
   KOKKOS_INLINE_FUNCTION
-  bool even_odd() const { return evenOdd_; }
+  bool evenOdd() const { return even_odd; }
 
   KOKKOS_INLINE_FUNCTION
-  int64_t size() const { return size_; }
+  int64_t size() const { return m_size; }
 
   KOKKOS_INLINE_FUNCTION
-  bool allocated() const { return allocated_; }
+  bool allocated() const { return m_allocated; }
 
   // Get raw data pointer (for kernels)
   KOKKOS_INLINE_FUNCTION
-  ComplexT *data() { return data_.data(); }
+  ComplexT *data() { return m_data.data(); }
 
   KOKKOS_INLINE_FUNCTION
-  const ComplexT *data() const { return data_.data(); }
+  const ComplexT *data() const { return m_data.data(); }
 
   // Get view
-  ViewT &getView() { return data_; }
-  const ViewT &getView() const { return data_; }
+  ViewT &getView() { return m_data; }
+  const ViewT &getView() const { return m_data; }
 
   // Get host view
-  host_ViewT &getHostView() { return hostData_; }
-  const host_ViewT &getHostView() const { return hostData_; }
+  HostViewT &getHostView() { return host_data; }
+  const HostViewT &getHostView() const { return host_data; }
 
   //=========================================================================
   // MPI halo (shared across kernels)
@@ -123,16 +123,16 @@ public:
     if (!params.mpi || params.nproc <= 1) {
       return nullptr;
     }
-    if (!halo_) {
-      halo_ = std::make_shared<GaugeHaloBuffers<Real>>(params);
+    if (!m_halo) {
+      m_halo = std::make_shared<GaugeHaloBuffers<Real>>(params);
     }
-    return halo_.get();
+    return m_halo.get();
   }
 
   /// Call after any whole-field write that bypasses the halo bookkeeping.
-  void invalidate_halo() {
-    if (halo_) {
-      halo_->invalidate();
+  void invalidateHalo() {
+    if (m_halo) {
+      m_halo->invalidate();
     }
   }
 
@@ -143,13 +143,13 @@ public:
   /**
    * @brief Get number of complex elements per link
    */
-  int getNumElems() const { return gauge_complex_elems(arrayType_); }
+  int getNumElems() const { return gaugeComplexElems(array_type); }
 
   /**
    * @brief Get total memory size in bytes
    */
   size_t bytes() const {
-    return static_cast<size_t>(size_) * getNumElems() * sizeof(ComplexT);
+    return static_cast<size_t>(m_size) * getNumElems() * sizeof(ComplexT);
   }
 
   /**
@@ -160,37 +160,37 @@ public:
   /**
    * @brief Allocate memory
    */
-  void allocate(int64_t sizeIn) {
-    if (allocated_) {
+  void allocate(int64_t size_in) {
+    if (m_allocated) {
       KWQFT_WARNING("Array already allocated");
       return;
     }
-    if (!evenOdd_) {
+    if (!even_odd) {
       KWQFT_ERROR("GaugeArray requires even/odd (checkerboard) ordering");
     }
 
-    size_ = sizeIn;
-    size_t totalElems = static_cast<size_t>(size_) * getNumElems();
+    m_size = size_in;
+    size_t total_elems = static_cast<size_t>(m_size) * getNumElems();
 
     // Allocate device view
-    data_ = ViewT("gauge_data", totalElems);
+    m_data = ViewT("gauge_data", total_elems);
 
     // Create host mirror
-    hostData_ = Kokkos::create_mirror_view(data_);
+    host_data = Kokkos::create_mirror_view(m_data);
 
-    allocated_ = true;
+    m_allocated = true;
   }
 
   /**
    * @brief Release memory (Kokkos handles this automatically)
    */
   void release() {
-    if (allocated_) {
-      data_ = ViewT();
-      hostData_ = host_ViewT();
-      halo_.reset();
-      size_ = 0;
-      allocated_ = false;
+    if (m_allocated) {
+      m_data = ViewT();
+      host_data = HostViewT();
+      m_halo.reset();
+      m_size = 0;
+      m_allocated = false;
     }
   }
 
@@ -198,10 +198,10 @@ public:
    * @brief Zero out the data
    */
   void clean() {
-    if (!allocated_)
+    if (!m_allocated)
       return;
-    Kokkos::deep_copy(data_, ComplexT::zero());
-    invalidate_halo();
+    Kokkos::deep_copy(m_data, ComplexT::zero());
+    invalidateHalo();
   }
 
   //=========================================================================
@@ -211,14 +211,14 @@ public:
   /**
    * @brief Copy data from device to host
    */
-  void copyToHost() { Kokkos::deep_copy(hostData_, data_); }
+  void copyToHost() { Kokkos::deep_copy(host_data, m_data); }
 
   /**
    * @brief Copy data from host to device
    */
   void copyToDevice() {
-    Kokkos::deep_copy(data_, hostData_);
-    invalidate_halo();
+    Kokkos::deep_copy(m_data, host_data);
+    invalidateHalo();
   }
 
   //=========================================================================
@@ -231,7 +231,7 @@ public:
   KOKKOS_INLINE_FUNCTION
   MatrixT get(int k) const {
     MatrixT m;
-    loadGaugeMatrix(data_.data(), static_cast<int64_t>(k), size_, arrayType_,
+    loadGaugeMatrix(m_data.data(), static_cast<int64_t>(k), m_size, array_type,
                     m);
     return m;
   }
@@ -240,9 +240,9 @@ public:
    * @brief Set a matrix in the array at position k (device function)
    */
   KOKKOS_INLINE_FUNCTION
-  void set(const MatrixT &A, int k) {
-    storeGaugeMatrix(data_.data(), static_cast<int64_t>(k), size_, arrayType_,
-                     A);
+  void set(const MatrixT &a, int k) {
+    storeGaugeMatrix(m_data.data(), static_cast<int64_t>(k), m_size, array_type,
+                     a);
   }
 
   //=========================================================================
@@ -253,19 +253,19 @@ public:
    * @brief Initialize with cold start (identity matrices)
    */
   void initCold() {
-    const int size = size_;
-    auto data_view = data_;
-    const ArrayType atype = arrayType_;
+    const int size = m_size;
+    auto data_view = m_data;
+    const ArrayType atype = array_type;
 
     Kokkos::parallel_for(
-        "GaugeArray::initCold", range_policy(0, size),
+        "GaugeArray::initCold", RangePolicy(0, size),
         KOKKOS_LAMBDA(const int k) {
           MatrixT I = MatrixT::identity();
           storeGaugeMatrix(data_view.data(), static_cast<int64_t>(k),
                            static_cast<int64_t>(size), atype, I);
         });
     Kokkos::fence();
-    invalidate_halo();
+    invalidateHalo();
   }
 
   /**
@@ -273,14 +273,14 @@ public:
    */
   void details() const {
     const char *type_str = "SOA";
-    if (arrayType_ == ArrayType::SOA12)
+    if (array_type == ArrayType::SOA12)
       type_str = "SOA12";
-    else if (arrayType_ == ArrayType::SOA8)
+    else if (array_type == ArrayType::SOA8)
       type_str = "SOA8";
 
     const char *loc_str =
-        (location_ == MemoryLocation::Device) ? "Device" : "Host";
-    const char *order_str = evenOdd_ ? "even/odd" : "normal";
+        (m_location == MemoryLocation::Device) ? "Device" : "Host";
+    const char *order_str = even_odd ? "even/odd" : "normal";
 
     printf("GaugeArray: type=%s, location=%s, ordering=%s, size=%.2f MB\n",
            type_str, loc_str, order_str, memoryMb());
@@ -288,10 +288,10 @@ public:
 };
 
 // Type aliases
-using gauges = GaugeArray<float>;
-using gauged = GaugeArray<double>;
+using Gauges = GaugeArray<float>;
+using Gauged = GaugeArray<double>;
 
-template <typename Real> using gauge = GaugeArray<Real>;
+template <typename Real> using Gauge = GaugeArray<Real>;
 
 } // namespace kwqft
 

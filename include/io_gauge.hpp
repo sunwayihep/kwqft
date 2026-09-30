@@ -23,7 +23,7 @@ namespace kwqft {
  * @param withheader    If true, prepend grid, beta, and precision metadata
  */
 template <typename Real, typename RealSaveConf>
-void save_gauge_binary(const GaugeArray<Real> &gauge,
+void saveGaugeBinary(const GaugeArray<Real> &gauge,
                        const std::string &filename, bool withheader = false);
 
 /**
@@ -33,7 +33,7 @@ void save_gauge_binary(const GaugeArray<Real> &gauge,
  * ranks.
  */
 template <typename Real, typename RealSaveConf>
-void load_gauge_binary(GaugeArray<Real> &gauge, const std::string &filename,
+void loadGaugeBinary(GaugeArray<Real> &gauge, const std::string &filename,
                        bool withheader = false);
 
 } // namespace kwqft

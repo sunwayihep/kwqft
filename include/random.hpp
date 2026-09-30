@@ -24,18 +24,18 @@ public:
   using generator_type = typename PoolType::generator_type;
 
 private:
-  PoolType pool_;
-  int size_;
+  PoolType pool;
+  int m_size;
   unsigned int m_seed;
   bool m_initialized;
 
 public:
   // Default constructor
-  RandomGenerator() : size_(0), m_seed(0), m_initialized(false) {}
+  RandomGenerator() : m_size(0), m_seed(0), m_initialized(false) {}
 
   // Constructor with seed
   RandomGenerator(unsigned int seed, int size)
-      : size_(size), m_seed(seed), m_initialized(false) {
+      : m_size(size), m_seed(seed), m_initialized(false) {
     init(seed, size);
   }
 
@@ -55,16 +55,16 @@ public:
       KWQFT_ERROR("RandomGenerator::init requires size > 0 (half_volume)");
 
     m_seed = seed;
-    size_ = size;
-    pool_ = PoolType(DefaultExecSpace(), seed, static_cast<uint64_t>(size_));
+    m_size = size;
+    pool = PoolType(DefaultExecSpace(), seed, static_cast<uint64_t>(m_size));
     m_initialized = true;
   }
 
   /**
    * @brief Get the pool for use in parallel kernels
    */
-  PoolType &getPool() { return pool_; }
-  const PoolType &getPool() const { return pool_; }
+  PoolType &getPool() { return pool; }
+  const PoolType &getPool() const { return pool; }
 
   /**
    * @brief Check if initialized
@@ -79,7 +79,7 @@ public:
   /**
    * @brief Get size
    */
-  int size() const { return size_; }
+  int size() const { return m_size; }
 
   /**
    * @brief Release resources
@@ -95,7 +95,7 @@ public:
  * @brief Generate uniform random number in [0, 1)
  */
 template <typename Real, typename Generator>
-KOKKOS_INLINE_FUNCTION Real Random(Generator &gen) {
+KOKKOS_INLINE_FUNCTION Real random(Generator &gen) {
   return gen.drand();
 }
 
@@ -103,7 +103,7 @@ KOKKOS_INLINE_FUNCTION Real Random(Generator &gen) {
  * @brief Generate uniform random number in [a, b)
  */
 template <typename Real, typename Generator>
-KOKKOS_INLINE_FUNCTION Real Random(Generator &gen, Real a, Real b) {
+KOKKOS_INLINE_FUNCTION Real random(Generator &gen, Real a, Real b) {
   return a + (b - a) * gen.drand();
 }
 
@@ -111,7 +111,7 @@ KOKKOS_INLINE_FUNCTION Real Random(Generator &gen, Real a, Real b) {
  * @brief Generate normal (Gaussian) random number
  */
 template <typename Real, typename Generator>
-KOKKOS_INLINE_FUNCTION Real RandomNormal(Generator &gen) {
+KOKKOS_INLINE_FUNCTION Real randomNormal(Generator &gen) {
   // Box-Muller transform
   Real u1 = gen.drand();
   Real u2 = gen.drand();
@@ -129,10 +129,10 @@ KOKKOS_INLINE_FUNCTION Msu2<Real> randomSU2(Generator &gen) {
   Msu2<Real> a;
   Real aabs, ctheta, stheta, phi;
 
-  a.a0() = Random<Real>(gen, Real(-1), Real(1));
+  a.a0() = random<Real>(gen, Real(-1), Real(1));
   aabs = Kokkos::sqrt(Real(1) - a.a0() * a.a0());
-  ctheta = Random<Real>(gen, Real(-1), Real(1));
-  phi = PI * Random<Real>(gen);
+  ctheta = random<Real>(gen, Real(-1), Real(1));
+  phi = PI * random<Real>(gen);
   // Random sign for sin(theta)
   int sign = (gen.urand() & 1) ? 1 : -1;
   stheta = sign * Kokkos::sqrt(Real(1) - ctheta * ctheta);
@@ -147,7 +147,7 @@ KOKKOS_INLINE_FUNCTION Msu2<Real> randomSU2(Generator &gen) {
  * @brief Generate SU(2) matrix for heatbath using MILC algorithm
  */
 template <typename Real, typename Generator>
-KOKKOS_INLINE_FUNCTION Msu2<Real> generateSu2Matrix_milc(Real al,
+KOKKOS_INLINE_FUNCTION Msu2<Real> generateSu2MatrixMilc(Real al,
                                                          Generator &gen) {
   Real xr1, xr2, xr3, xr4, d, r;
 
@@ -222,16 +222,16 @@ KOKKOS_INLINE_FUNCTION Msu2<Real> generateSu2Matrix_milc(Real al,
  */
 template <typename Real, typename Generator>
 KOKKOS_INLINE_FUNCTION MatrixSun<Real, NCOLORS> randomize(Generator &gen) {
-  MatrixSun<Real, NCOLORS> U;
+  MatrixSun<Real, NCOLORS> u;
 
   for (int i = 0; i < NCOLORS; ++i) {
     for (int j = 0; j < NCOLORS; ++j) {
-      U.e[i][j] =
+      u.e[i][j] =
           Complex<Real>(gen.drand() - Real(0.5), gen.drand() - Real(0.5));
     }
   }
 
-  return U;
+  return u;
 }
 
 // Type alias for convenience

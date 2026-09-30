@@ -22,10 +22,10 @@
 
 namespace kwqft {
 
-constexpr int gauge_matrix_elems() { return NCOLORS * NCOLORS; }
+constexpr int gaugeMatrixElems() { return NCOLORS * NCOLORS; }
 
 /// Max composed nearest-neighbor shifts on a lazy view (staple needs 2).
-constexpr int LCM_MAX_SHIFTS = 4;
+constexpr int lcm_max_shifts = 4;
 
 /**
  * @brief One SU(N) matrix per site (QDP \c LatticeColorMatrix).
@@ -35,47 +35,47 @@ constexpr int LCM_MAX_SHIFTS = 4;
  */
 template <typename Real> class LatticeColorMatrix {
 public:
-  using value_type = Real;
+  using ValueType = Real;
   using ComplexT = Complex<Real>;
   using MatrixT = MatrixSun<Real, NCOLORS>;
-  static constexpr int site_elems = gauge_matrix_elems();
+  static constexpr int site_elems = gaugeMatrixElems();
 
   LatticeColorMatrix() = default;
 
   KOKKOS_INLINE_FUNCTION
-  static LatticeColorMatrix gauge_soa(const ComplexT *base, int64_t stride,
+  static LatticeColorMatrix gaugeSoa(const ComplexT *base, int64_t stride,
                                       int mu,
                                       ArrayType atype = ArrayType::SOA) {
     LatticeColorMatrix f;
-    f.data_ = base;
-    f.stride_ = stride;
-    f.link_dir_ = mu;
-    f.atype_ = atype;
+    f.m_data = base;
+    f.m_stride = stride;
+    f.link_dir = mu;
+    f.atype = atype;
     return f;
   }
 
-  KOKKOS_INLINE_FUNCTION const ComplexT *data() const { return data_; }
-  KOKKOS_INLINE_FUNCTION int64_t stride() const { return stride_; }
-  KOKKOS_INLINE_FUNCTION int link_dir() const { return link_dir_; }
-  KOKKOS_INLINE_FUNCTION ArrayType array_type() const { return atype_; }
-  KOKKOS_INLINE_FUNCTION bool adjoint() const { return adjoint_; }
+  KOKKOS_INLINE_FUNCTION const ComplexT *data() const { return m_data; }
+  KOKKOS_INLINE_FUNCTION int64_t stride() const { return m_stride; }
+  KOKKOS_INLINE_FUNCTION int linkDir() const { return link_dir; }
+  KOKKOS_INLINE_FUNCTION ArrayType arrayType() const { return atype; }
+  KOKKOS_INLINE_FUNCTION bool adjoint() const { return m_adjoint; }
 
   KOKKOS_INLINE_FUNCTION
-  LatticeColorMatrix with_shift(ShiftDirection dir, int mu) const {
+  LatticeColorMatrix withShift(ShiftDirection dir, int mu) const {
     LatticeColorMatrix out = *this;
-    if (out.n_shifts_ >= LCM_MAX_SHIFTS) {
+    if (out.n_shifts >= lcm_max_shifts) {
       return out;
     }
-    out.shift_mu_[out.n_shifts_] = mu;
-    out.shift_sign_[out.n_shifts_] = static_cast<int>(dir);
-    out.n_shifts_++;
+    out.shift_mu[out.n_shifts] = mu;
+    out.shift_sign[out.n_shifts] = static_cast<int>(dir);
+    out.n_shifts++;
     return out;
   }
 
   KOKKOS_INLINE_FUNCTION
-  LatticeColorMatrix with_adjoint() const {
+  LatticeColorMatrix withAdjoint() const {
     LatticeColorMatrix out = *this;
-    out.adjoint_ = !out.adjoint_;
+    out.m_adjoint = !out.m_adjoint;
     return out;
   }
 
@@ -87,29 +87,29 @@ public:
    * MPI: only sites whose shift chain crosses a split-domain face use \p halo.
    */
   KOKKOS_INLINE_FUNCTION
-  void load_at(int64_t idx_eo, const LatticeParams &p,
-               const GaugeHaloDevice<Real> *halo, MatrixT &U) const {
+  void loadAt(int64_t idx_eo, const LatticeParams &p,
+               const GaugeHaloDevice<Real> *halo, MatrixT &u) const {
     // Address resolution only; the Nc^2 element copy (and the adjoint, folded
     // into that copy) happens exactly once at the end. Each branch below is
     // scalar index arithmetic, so device code size stays O(Nc^2), not
     // O(branches * Nc^2).
-    loadGaugeLinkRef(resolve_at(idx_eo, p, halo), adjoint_, U);
+    loadGaugeLinkRef(resolveAt(idx_eo, p, halo), m_adjoint, u);
   }
 
   /// Locate the matrix this view evaluates to at EO site \p idx_eo.
   KOKKOS_INLINE_FUNCTION
-  GaugeLinkRef<Real> resolve_at(int64_t idx_eo, const LatticeParams &p,
+  GaugeLinkRef<Real> resolveAt(int64_t idx_eo, const LatticeParams &p,
                                 const GaugeHaloDevice<Real> *halo) const {
     // No shifts: the evaluation site itself.
-    if (n_shifts_ == 0) {
-      return gaugeLinkRefSoa(data_, idx_eo, link_dir_, stride_, p, atype_);
+    if (n_shifts == 0) {
+      return gaugeLinkRefSoa(m_data, idx_eo, link_dir, m_stride, p, atype);
     }
 
     // Fast path: every shift direction is local (no MPI split).
     bool local_eo = true;
     if (p.mpi) {
-      for (int s = 0; s < n_shifts_; ++s) {
-        if (p.proc_grid[shift_mu_[s]] > 1) {
+      for (int s = 0; s < n_shifts; ++s) {
+        if (p.proc_grid[shift_mu[s]] > 1) {
           local_eo = false;
           break;
         }
@@ -120,9 +120,9 @@ public:
     const int oddbit = (idx_eo >= p.half_volume) ? 1 : 0;
     const int64_t id = idx_eo - static_cast<int64_t>(oddbit) * p.half_volume;
     int x[NDIMS];
-    eo_to_coords(id, oddbit, x, p);
-    for (int s = 0; s < n_shifts_; ++s) {
-      x[shift_mu_[s]] += shift_sign_[s];
+    eoToCoords(id, oddbit, x, p);
+    for (int s = 0; s < n_shifts; ++s) {
+      x[shift_mu[s]] += shift_sign[s];
     }
 
     if (local_eo) {
@@ -135,13 +135,13 @@ public:
         }
         x[d] = v;
       }
-      const int64_t idx = coords_to_eo_idx(x, p);
-      return gaugeLinkRefSoa(data_, idx, link_dir_, stride_, p, atype_);
+      const int64_t idx = coordsToEoIdx(x, p);
+      return gaugeLinkRefSoa(m_data, idx, link_dir, m_stride, p, atype);
     }
     // May leave the subdomain; halo path handles out-of-range coords.
-    // Halo buffers are always full SOA; local interior uses atype_.
-    return resolveGaugeLinkAtCoords(data_, stride_, halo, x, link_dir_, p,
-                                    atype_);
+    // Halo buffers are always full SOA; local interior uses atype.
+    return resolveGaugeLinkAtCoords(m_data, m_stride, halo, x, link_dir, p,
+                                    atype);
   }
 
   /**
@@ -150,21 +150,21 @@ public:
    *
    * Used by cross-site SIMD batches, which decode each lane once and then
    * resolve every staple leg from those coordinates. Shift chains move a
-   * coordinate by at most \c LCM_MAX_SHIFTS, so the periodic wrap is done by
+   * coordinate by at most \c lcm_max_shifts, so the periodic wrap is done by
    * add/subtract instead of integer division.
    */
   KOKKOS_INLINE_FUNCTION
   GaugeLinkRef<Real>
-  resolve_at_coords(int64_t idx_eo, const int x0[NDIMS], const LatticeParams &p,
+  resolveAtCoords(int64_t idx_eo, const int x0[NDIMS], const LatticeParams &p,
                     const GaugeHaloDevice<Real> *halo) const {
-    if (n_shifts_ == 0) {
-      return gaugeLinkRefSoa(data_, idx_eo, link_dir_, stride_, p, atype_);
+    if (n_shifts == 0) {
+      return gaugeLinkRefSoa(m_data, idx_eo, link_dir, m_stride, p, atype);
     }
 
     bool local_eo = true;
     if (p.mpi) {
-      for (int s = 0; s < n_shifts_; ++s) {
-        if (p.proc_grid[shift_mu_[s]] > 1) {
+      for (int s = 0; s < n_shifts; ++s) {
+        if (p.proc_grid[shift_mu[s]] > 1) {
           local_eo = false;
           break;
         }
@@ -175,8 +175,8 @@ public:
     for (int d = 0; d < NDIMS; ++d) {
       x[d] = x0[d];
     }
-    for (int s = 0; s < n_shifts_; ++s) {
-      x[shift_mu_[s]] += shift_sign_[s];
+    for (int s = 0; s < n_shifts; ++s) {
+      x[shift_mu[s]] += shift_sign[s];
     }
 
     if (local_eo) {
@@ -189,22 +189,22 @@ public:
           x[d] -= g;
         }
       }
-      const int64_t idx = coords_to_eo_idx(x, p);
-      return gaugeLinkRefSoa(data_, idx, link_dir_, stride_, p, atype_);
+      const int64_t idx = coordsToEoIdx(x, p);
+      return gaugeLinkRefSoa(m_data, idx, link_dir, m_stride, p, atype);
     }
-    return resolveGaugeLinkAtCoords(data_, stride_, halo, x, link_dir_, p,
-                                    atype_);
+    return resolveGaugeLinkAtCoords(m_data, m_stride, halo, x, link_dir, p,
+                                    atype);
   }
 
 private:
-  const ComplexT *data_{nullptr};
-  int64_t stride_{0};
-  int link_dir_{0};
-  ArrayType atype_{ArrayType::SOA};
-  bool adjoint_{false};
-  int n_shifts_{0};
-  int shift_mu_[LCM_MAX_SHIFTS]{};
-  int shift_sign_[LCM_MAX_SHIFTS]{};
+  const ComplexT *m_data{nullptr};
+  int64_t m_stride{0};
+  int link_dir{0};
+  ArrayType atype{ArrayType::SOA};
+  bool m_adjoint{false};
+  int n_shifts{0};
+  int shift_mu[lcm_max_shifts]{};
+  int shift_sign[lcm_max_shifts]{};
 };
 
 /// All Nd link directions (QDP \c multi1d<LatticeColorMatrix> \c u).
@@ -217,28 +217,28 @@ public:
   KOKKOS_INLINE_FUNCTION
   LatticeGaugeLinks(const ComplexT *data, int64_t soa_stride,
                     ArrayType atype = ArrayType::SOA)
-      : data_(data), stride_(soa_stride), atype_(atype) {}
+      : m_data(data), m_stride(soa_stride), atype(atype) {}
 
-  KOKKOS_INLINE_FUNCTION const ComplexT *data() const { return data_; }
-  KOKKOS_INLINE_FUNCTION int64_t stride() const { return stride_; }
-  KOKKOS_INLINE_FUNCTION ArrayType array_type() const { return atype_; }
+  KOKKOS_INLINE_FUNCTION const ComplexT *data() const { return m_data; }
+  KOKKOS_INLINE_FUNCTION int64_t stride() const { return m_stride; }
+  KOKKOS_INLINE_FUNCTION ArrayType arrayType() const { return atype; }
 
   KOKKOS_INLINE_FUNCTION
   MatrixT operator[](int mu) const {
-    return MatrixT::gauge_soa(data_, stride_, mu, atype_);
+    return MatrixT::gaugeSoa(m_data, m_stride, mu, atype);
   }
 
 private:
-  const ComplexT *data_{nullptr};
-  int64_t stride_{0};
-  ArrayType atype_{ArrayType::SOA};
+  const ComplexT *m_data{nullptr};
+  int64_t m_stride{0};
+  ArrayType atype{ArrayType::SOA};
 };
 
 /// Lazy QDP-style shift: \c result(x) = field(x + dir * e_mu).  No data move.
 template <typename Real>
 KOKKOS_INLINE_FUNCTION LatticeColorMatrix<Real>
 shift(const LatticeColorMatrix<Real> &field, ShiftDirection dir, int mu) {
-  return field.with_shift(dir, mu);
+  return field.withShift(dir, mu);
 }
 
 } // namespace kwqft

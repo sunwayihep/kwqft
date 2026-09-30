@@ -20,78 +20,78 @@ namespace kwqft {
 /// that enter with a minus sign go to separate accumulators (Kokkos has no
 /// fused multiply-subtract), which also gives four independent FMA chains.
 template <bool HermA, bool HermB, typename Real, int Nc>
-KOKKOS_INLINE_FUNCTION void gemm_ijk_fma(const Complex<Real> (&A)[Nc][Nc],
-                                         const Complex<Real> (&B)[Nc][Nc],
-                                         Complex<Real> (&C)[Nc][Nc]) {
+KOKKOS_INLINE_FUNCTION void gemmIjkFma(const Complex<Real> (&a)[Nc][Nc],
+                                         const Complex<Real> (&b)[Nc][Nc],
+                                         Complex<Real> (&c)[Nc][Nc]) {
   for (int i = 0; i < Nc; ++i) {
     for (int j = 0; j < Nc; ++j) {
       Real xp(0), xm(0), yp(0), ym(0);
       for (int k = 0; k < Nc; ++k) {
-        const Complex<Real> &a = HermA ? A[k][i] : A[i][k];
-        const Complex<Real> &b = HermB ? B[j][k] : B[k][j];
-        xp = Kokkos::fma(a.x, b.x, xp);
+        const Complex<Real> &ak = HermA ? a[k][i] : a[i][k];
+        const Complex<Real> &bk = HermB ? b[j][k] : b[k][j];
+        xp = Kokkos::fma(ak.x, bk.x, xp);
         if constexpr (HermA != HermB) {
-          xp = Kokkos::fma(a.y, b.y, xp);
+          xp = Kokkos::fma(ak.y, bk.y, xp);
         } else {
-          xm = Kokkos::fma(a.y, b.y, xm);
+          xm = Kokkos::fma(ak.y, bk.y, xm);
         }
         if constexpr (HermB) {
-          ym = Kokkos::fma(a.x, b.y, ym);
+          ym = Kokkos::fma(ak.x, bk.y, ym);
         } else {
-          yp = Kokkos::fma(a.x, b.y, yp);
+          yp = Kokkos::fma(ak.x, bk.y, yp);
         }
         if constexpr (HermA) {
-          ym = Kokkos::fma(a.y, b.x, ym);
+          ym = Kokkos::fma(ak.y, bk.x, ym);
         } else {
-          yp = Kokkos::fma(a.y, b.x, yp);
+          yp = Kokkos::fma(ak.y, bk.x, yp);
         }
       }
-      C[i][j] = Complex<Real>(xp - xm, yp - ym);
+      c[i][j] = Complex<Real>(xp - xm, yp - ym);
     }
   }
 }
 
 template <bool HermA, bool HermB, typename Real, int Nc>
-KWQFT_INLINE_FUNCTION void gemm_ijk(const Complex<Real> (&A)[Nc][Nc],
-                                    const Complex<Real> (&B)[Nc][Nc],
-                                    Complex<Real> (&C)[Nc][Nc]) {
+KWQFT_INLINE_FUNCTION void gemmIjk(const Complex<Real> (&a)[Nc][Nc],
+                                    const Complex<Real> (&b)[Nc][Nc],
+                                    Complex<Real> (&c)[Nc][Nc]) {
   for (int i = 0; i < Nc; ++i) {
     for (int j = 0; j < Nc; ++j) {
       Complex<Real> s;
       if constexpr (HermA && HermB) {
-        s = ~A[0][i] * ~B[j][0];
+        s = ~a[0][i] * ~b[j][0];
       } else if constexpr (HermA) {
-        s = ~A[0][i] * B[0][j];
+        s = ~a[0][i] * b[0][j];
       } else if constexpr (HermB) {
-        s = A[i][0] * ~B[j][0];
+        s = a[i][0] * ~b[j][0];
       } else {
-        s = A[i][0] * B[0][j];
+        s = a[i][0] * b[0][j];
       }
       for (int k = 1; k < Nc; ++k) {
         if constexpr (HermA && HermB) {
-          s += ~A[k][i] * ~B[j][k];
+          s += ~a[k][i] * ~b[j][k];
         } else if constexpr (HermA) {
-          s += ~A[k][i] * B[k][j];
+          s += ~a[k][i] * b[k][j];
         } else if constexpr (HermB) {
-          s += A[i][k] * ~B[j][k];
+          s += a[i][k] * ~b[j][k];
         } else {
-          s += A[i][k] * B[k][j];
+          s += a[i][k] * b[k][j];
         }
       }
-      C[i][j] = s;
+      c[i][j] = s;
     }
   }
 }
 
 /// C = op(A) * op(B). HermX selects conjugate-transpose.
 template <bool HermA, bool HermB, typename Real, int Nc>
-KWQFT_INLINE_FUNCTION void sun_gemm(const Complex<Real> (&A)[Nc][Nc],
-                                    const Complex<Real> (&B)[Nc][Nc],
-                                    Complex<Real> (&C)[Nc][Nc]) {
+KWQFT_INLINE_FUNCTION void sunGemm(const Complex<Real> (&a)[Nc][Nc],
+                                    const Complex<Real> (&b)[Nc][Nc],
+                                    Complex<Real> (&c)[Nc][Nc]) {
   if constexpr (std::is_floating_point_v<Real>) {
-    gemm_ijk<HermA, HermB>(A, B, C);
+    gemmIjk<HermA, HermB>(a, b, c);
   } else {
-    gemm_ijk_fma<HermA, HermB>(A, B, C);
+    gemmIjkFma<HermA, HermB>(a, b, c);
   }
 }
 
@@ -120,21 +120,21 @@ public:
   // Addition operations
   //=========================================================================
   KOKKOS_INLINE_FUNCTION
-  MatrixSun operator+(const MatrixSun &A) const {
+  MatrixSun operator+(const MatrixSun &a) const {
     MatrixSun res;
     for (int i = 0; i < Nc; ++i) {
       for (int j = 0; j < Nc; ++j) {
-        res.e[i][j] = e[i][j] + A.e[i][j];
+        res.e[i][j] = e[i][j] + a.e[i][j];
       }
     }
     return res;
   }
 
   KOKKOS_INLINE_FUNCTION
-  MatrixSun &operator+=(const MatrixSun &A) {
+  MatrixSun &operator+=(const MatrixSun &a) {
     for (int i = 0; i < Nc; ++i) {
       for (int j = 0; j < Nc; ++j) {
-        e[i][j] += A.e[i][j];
+        e[i][j] += a.e[i][j];
       }
     }
     return *this;
@@ -144,21 +144,21 @@ public:
   // Subtraction operations
   //=========================================================================
   KOKKOS_INLINE_FUNCTION
-  MatrixSun operator-(const MatrixSun &A) const {
+  MatrixSun operator-(const MatrixSun &a) const {
     MatrixSun res;
     for (int i = 0; i < Nc; ++i) {
       for (int j = 0; j < Nc; ++j) {
-        res.e[i][j] = e[i][j] - A.e[i][j];
+        res.e[i][j] = e[i][j] - a.e[i][j];
       }
     }
     return res;
   }
 
   KOKKOS_INLINE_FUNCTION
-  MatrixSun &operator-=(const MatrixSun &A) {
+  MatrixSun &operator-=(const MatrixSun &a) {
     for (int i = 0; i < Nc; ++i) {
       for (int j = 0; j < Nc; ++j) {
-        e[i][j] -= A.e[i][j];
+        e[i][j] -= a.e[i][j];
       }
     }
     return *this;
@@ -182,15 +182,15 @@ public:
 
   // Matrix-matrix multiplication
   KWQFT_INLINE_FUNCTION
-  MatrixSun operator*(const MatrixSun &A) const {
+  MatrixSun operator*(const MatrixSun &a) const {
     MatrixSun res;
-    sun_gemm<false, false>(e, A.e, res.e);
+    sunGemm<false, false>(e, a.e, res.e);
     return res;
   }
 
   KOKKOS_INLINE_FUNCTION
-  MatrixSun &operator*=(const MatrixSun &A) {
-    *this = (*this) * A;
+  MatrixSun &operator*=(const MatrixSun &a) {
+    *this = (*this) * a;
     return *this;
   }
 
@@ -430,10 +430,10 @@ public:
  */
 template <typename Real, int Nc>
 KOKKOS_INLINE_FUNCTION MatrixSun<Real, Nc>
-UDaggerU(const MatrixSun<Real, Nc> &A, const MatrixSun<Real, Nc> &B) {
-  MatrixSun<Real, Nc> C;
-  sun_gemm<true, false>(A.e, B.e, C.e);
-  return C;
+uDaggerU(const MatrixSun<Real, Nc> &a, const MatrixSun<Real, Nc> &b) {
+  MatrixSun<Real, Nc> c;
+  sunGemm<true, false>(a.e, b.e, c.e);
+  return c;
 }
 
 /**
@@ -441,23 +441,23 @@ UDaggerU(const MatrixSun<Real, Nc> &A, const MatrixSun<Real, Nc> &B) {
  */
 template <typename Real, int Nc>
 KWQFT_INLINE_FUNCTION MatrixSun<Real, Nc>
-UUDagger(const MatrixSun<Real, Nc> &A, const MatrixSun<Real, Nc> &B) {
-  MatrixSun<Real, Nc> C;
-  sun_gemm<false, true>(A.e, B.e, C.e);
-  return C;
+uuDagger(const MatrixSun<Real, Nc> &a, const MatrixSun<Real, Nc> &b) {
+  MatrixSun<Real, Nc> c;
+  sunGemm<false, true>(a.e, b.e, c.e);
+  return c;
 }
 
 /**
  * @brief Real part of trace(A^\dagger * B)
  */
 template <typename Real, int Nc>
-KOKKOS_INLINE_FUNCTION Real UDaggerURealTrace(const MatrixSun<Real, Nc> &A,
-                                              const MatrixSun<Real, Nc> &B) {
+KOKKOS_INLINE_FUNCTION Real uDaggerURealTrace(const MatrixSun<Real, Nc> &a,
+                                              const MatrixSun<Real, Nc> &b) {
   Real res = Real(0);
   for (int i = 0; i < Nc; ++i) {
     for (int k = 0; k < Nc; ++k) {
-      res += A.e[k][i].real() * B.e[k][i].real() +
-             A.e[k][i].imag() * B.e[k][i].imag();
+      res += a.e[k][i].real() * b.e[k][i].real() +
+             a.e[k][i].imag() * b.e[k][i].imag();
     }
   }
   return res;
@@ -503,7 +503,7 @@ KOKKOS_INLINE_FUNCTION Real realtraceUVdagger(const MatrixSun<Real, Nc> &a,
  * @brief Calculate the SU(2) index block indices
  */
 KOKKOS_INLINE_FUNCTION
-void IndexBlock(int block, int &p, int &q) {
+void indexBlock(int block, int &p, int &q) {
   if constexpr (NCOLORS == 3) {
     if (block == 0) {
       p = 0;
@@ -567,18 +567,6 @@ KOKKOS_INLINE_FUNCTION void mulBlockSun(Msu2<Real> u, MatrixSun<Real, Nc> &link,
     link.e[p][j] = tmp;
   }
 }
-
-//=============================================================================
-// Type aliases
-//=============================================================================
-
-template <typename Real> using msun = MatrixSun<Real, NCOLORS>;
-
-template <typename Real>
-using msu3 = MatrixSun<Real, NCOLORS>; // For compatibility
-
-using msuns = MatrixSun<float, NCOLORS>;
-using msund = MatrixSun<double, NCOLORS>;
 
 } // namespace kwqft
 

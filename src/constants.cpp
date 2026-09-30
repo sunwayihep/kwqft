@@ -21,17 +21,17 @@ bool initialized = false;
 static std::unique_ptr<ParamsView> s_device_params;
 static std::unique_ptr<ParamsHostView> s_host_params_mirror;
 
-ParamsView &get_device_params() {
+ParamsView &getDeviceParams() {
   if (!s_device_params) {
     s_device_params = std::make_unique<ParamsView>("device_params");
   }
   return *s_device_params;
 }
 
-ParamsHostView &get_host_params_mirror() {
+ParamsHostView &getHostParamsMirror() {
   if (!s_host_params_mirror) {
     s_host_params_mirror = std::make_unique<ParamsHostView>(
-        Kokkos::create_mirror_view(get_device_params()));
+        Kokkos::create_mirror_view(getDeviceParams()));
   }
   return *s_host_params_mirror;
 }
@@ -47,8 +47,8 @@ void initializeParams(const std::vector<int> &lattice_size, double beta,
   PARAMS::initialized = true;
 
   // Initialize device params view (lazy)
-  auto &device_params = get_device_params();
-  auto &host_mirror = get_host_params_mirror();
+  auto &device_params = getDeviceParams();
+  auto &host_mirror = getHostParamsMirror();
 
   // Copy to host mirror
   host_mirror() = PARAMS::params;
@@ -57,7 +57,7 @@ void initializeParams(const std::vector<int> &lattice_size, double beta,
   Kokkos::deep_copy(device_params, host_mirror);
 
   if (verbose) {
-    print_params();
+    printParams();
   }
 }
 
@@ -80,9 +80,9 @@ void initializeParamsDistributed(const std::vector<int> &global_lattice,
 
   LatticeParams &p = PARAMS::params;
   p.mpi = true;
-  p.rank = mpi_comm_rank();
-  p.nproc = mpi_comm_size();
-  mpi_cart_get_coords(p.coord);
+  p.rank = mpiCommRank();
+  p.nproc = mpiCommSize();
+  mpiCartGetCoords(p.coord);
 
   p.volume = 1;
   for (int i = 0; i < NDIMS; ++i) {
@@ -140,31 +140,31 @@ void initializeParamsDistributed(const std::vector<int> &global_lattice,
 
   PARAMS::initialized = true;
 
-  auto &device_params = get_device_params();
-  auto &host_mirror = get_host_params_mirror();
+  auto &device_params = getDeviceParams();
+  auto &host_mirror = getHostParamsMirror();
   host_mirror() = PARAMS::params;
   Kokkos::deep_copy(device_params, host_mirror);
 
   if (verbose) {
-    print_params();
+    printParams();
   }
 }
 
-void copy_params_to_device() {
+void copyParamsToDevice() {
   if (!PARAMS::initialized) {
     KWQFT_ERROR("Parameters not initialized");
     return;
   }
 
-  auto &device_params = get_device_params();
-  auto &host_mirror = get_host_params_mirror();
+  auto &device_params = getDeviceParams();
+  auto &host_mirror = getHostParamsMirror();
 
   host_mirror() = PARAMS::params;
   Kokkos::deep_copy(device_params, host_mirror);
 }
 
-void print_params() {
-  if (PARAMS::params.mpi && mpi_comm_rank() != 0) {
+void printParams() {
+  if (PARAMS::params.mpi && mpiCommRank() != 0) {
     return;
   }
   printf("==========================================================\n");

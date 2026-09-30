@@ -70,8 +70,8 @@ struct LatticeParams {
   }
 
   // Initialize from lattice dimensions and beta
-  void initialize(const std::vector<int> &lattice_size, double _beta,
-                  double _xi0 = 1.0) {
+  void initialize(const std::vector<int> &lattice_size, double beta,
+                  double xi0 = 1.0) {
     if (static_cast<int>(lattice_size.size()) != NDIMS) {
       KWQFT_ERROR("Lattice size vector must have NDIMS elements");
     }
@@ -100,9 +100,9 @@ struct LatticeParams {
       tstride *= static_cast<int64_t>(grid[i]);
     }
 
-    beta = _beta;
+    this->beta = beta;
     beta_over_nc = beta / static_cast<double>(NCOLORS);
-    xi0 = _xi0;
+    this->xi0 = xi0;
     mpi = false;
     rank = 0;
     nproc = 1;
@@ -134,15 +134,15 @@ struct LatticeParams {
 
   // Get grid dimension
   KOKKOS_INLINE_FUNCTION
-  int get_grid(int dim) const { return grid[dim]; }
+  int getGrid(int dim) const { return grid[dim]; }
 
   // Get grid dimension with ghost
   KOKKOS_INLINE_FUNCTION
-  int get_grid_g(int dim) const { return grid_with_ghost[dim]; }
+  int getGridG(int dim) const { return grid_with_ghost[dim]; }
 
   // Get border
   KOKKOS_INLINE_FUNCTION
-  int get_border(int dim) const { return border[dim]; }
+  int getBorder(int dim) const { return border[dim]; }
 };
 
 // Global host parameters (to be initialized at startup)
@@ -159,12 +159,12 @@ using ParamsHostView = typename ParamsView::host_mirror_type;
 /**
  * @brief Get the device parameters view (lazy initialization)
  */
-ParamsView &get_device_params();
+ParamsView &getDeviceParams();
 
 /**
  * @brief Get the host mirror view (lazy initialization)
  */
-ParamsHostView &get_host_params_mirror();
+ParamsHostView &getHostParamsMirror();
 
 /**
  * @brief Initialize the global lattice parameters
@@ -188,12 +188,12 @@ void initializeParamsDistributed(const std::vector<int> &global_lattice,
 /**
  * @brief Copy parameters to device memory
  */
-void copy_params_to_device();
+void copyParamsToDevice();
 
 /**
  * @brief Print lattice details
  */
-void print_params();
+void printParams();
 
 /**
  * @brief Cleanup Kokkos views (call before Kokkos::finalize)
@@ -205,38 +205,38 @@ void finalizeParams();
 //=============================================================================
 
 KOKKOS_INLINE_FUNCTION
-int param_Grid(const LatticeParams &p, int dim) { return p.grid[dim]; }
+int paramGrid(const LatticeParams &p, int dim) { return p.grid[dim]; }
 
 KOKKOS_INLINE_FUNCTION
-int param_GridG(const LatticeParams &p, int dim) {
+int paramGridG(const LatticeParams &p, int dim) {
   return p.grid_with_ghost[dim];
 }
 
 KOKKOS_INLINE_FUNCTION
-int64_t param_Volume(const LatticeParams &p) { return p.volume; }
+int64_t paramVolume(const LatticeParams &p) { return p.volume; }
 
 KOKKOS_INLINE_FUNCTION
-int64_t param_HalfVolume(const LatticeParams &p) { return p.half_volume; }
+int64_t paramHalfVolume(const LatticeParams &p) { return p.half_volume; }
 
 KOKKOS_INLINE_FUNCTION
-int64_t param_VolumeG(const LatticeParams &p) { return p.volume_with_ghost; }
+int64_t paramVolumeG(const LatticeParams &p) { return p.volume_with_ghost; }
 
 KOKKOS_INLINE_FUNCTION
-int64_t param_HalfVolumeG(const LatticeParams &p) {
+int64_t paramHalfVolumeG(const LatticeParams &p) {
   return p.half_volume_with_ghost;
 }
 
 KOKKOS_INLINE_FUNCTION
-int64_t param_Size(const LatticeParams &p) { return p.size; }
+int64_t paramSize(const LatticeParams &p) { return p.size; }
 
 KOKKOS_INLINE_FUNCTION
-double param_Beta(const LatticeParams &p) { return p.beta; }
+double paramBeta(const LatticeParams &p) { return p.beta; }
 
 KOKKOS_INLINE_FUNCTION
-double param_BetaOverNc(const LatticeParams &p) { return p.beta_over_nc; }
+double paramBetaOverNc(const LatticeParams &p) { return p.beta_over_nc; }
 
 KOKKOS_INLINE_FUNCTION
-int param_border(const LatticeParams &p, int dim) { return p.border[dim]; }
+int paramBorder(const LatticeParams &p, int dim) { return p.border[dim]; }
 
 } // namespace kwqft
 

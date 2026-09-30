@@ -17,12 +17,12 @@ namespace kwqft {
 
 #ifdef KWQFT_USE_MPI
 static MPI_Comm g_cart_comm = MPI_COMM_NULL;
-MPI_Comm kwqft_mpi_cart_comm() { return g_cart_comm; }
+MPI_Comm kwqftMpiCartComm() { return g_cart_comm; }
 #else
-void *kwqft_mpi_cart_comm_opaque() { return nullptr; }
+void *kwqftMpiCartCommOpaque() { return nullptr; }
 #endif
 
-void mpi_env_init(int *argc, char ***argv) {
+void mpiEnvInit(int *argc, char ***argv) {
 #ifdef KWQFT_USE_MPI
   int t = 0;
   MPI_Initialized(&t);
@@ -35,7 +35,7 @@ void mpi_env_init(int *argc, char ***argv) {
 #endif
 }
 
-void mpi_env_finalize() {
+void mpiEnvFinalize() {
 #ifdef KWQFT_USE_MPI
   int t = 0;
   MPI_Finalized(&t);
@@ -45,7 +45,7 @@ void mpi_env_finalize() {
 #endif
 }
 
-void mpi_setup_cartesian(const int proc_grid[NDIMS],
+void mpiSetupCartesian(const int proc_grid[NDIMS],
                          const int global_grid[NDIMS]) {
 #ifdef KWQFT_USE_MPI
   int size = 1, rank = 0;
@@ -91,7 +91,7 @@ void mpi_setup_cartesian(const int proc_grid[NDIMS],
 #endif
 }
 
-void mpi_cart_get_coords(int coord[NDIMS]) {
+void mpiCartGetCoords(int coord[NDIMS]) {
 #ifdef KWQFT_USE_MPI
   if (g_cart_comm == MPI_COMM_NULL) {
     for (int d = 0; d < NDIMS; ++d) {
@@ -109,7 +109,7 @@ void mpi_cart_get_coords(int coord[NDIMS]) {
 #endif
 }
 
-int mpi_cart_neighbor(int mu, int sign) {
+int mpiCartNeighbor(int mu, int sign) {
 #ifdef KWQFT_USE_MPI
   if (g_cart_comm == MPI_COMM_NULL) {
     return -1;
@@ -124,7 +124,7 @@ int mpi_cart_neighbor(int mu, int sign) {
 #endif
 }
 
-int mpi_comm_rank() {
+int mpiCommRank() {
 #ifdef KWQFT_USE_MPI
   int r = 0;
   if (MPI_COMM_WORLD != MPI_COMM_NULL) {
@@ -136,7 +136,7 @@ int mpi_comm_rank() {
 #endif
 }
 
-int mpi_comm_size() {
+int mpiCommSize() {
 #ifdef KWQFT_USE_MPI
   int s = 1;
   MPI_Comm_size(MPI_COMM_WORLD, &s);
@@ -146,7 +146,7 @@ int mpi_comm_size() {
 #endif
 }
 
-bool parse_geom_argv(int argc, char **argv, int proc_grid[NDIMS],
+bool parseGeomArgv(int argc, char **argv, int proc_grid[NDIMS],
                      std::vector<std::string> &positional_out) {
   positional_out.clear();
   int start = 1;

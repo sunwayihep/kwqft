@@ -20,7 +20,7 @@
 
 using namespace kwqft;
 
-void reset_and_initialize_params(const std::vector<int> &lattice_size,
+void resetAndInitializeParams(const std::vector<int> &lattice_size,
                                  double beta, double xi0 = 1.0) {
   if (PARAMS::initialized) {
     finalizeParams();
@@ -31,10 +31,10 @@ void reset_and_initialize_params(const std::vector<int> &lattice_size,
 /// beta giving a weak-coupling plaquette (~0.6) for any Nc, scaling the
 /// SU(3) value 6.0 with the number of generators: SU(2) 2.25, SU(4) 11.25.
 /// The thermalization range checks below assume this.
-constexpr double kTestBeta = 0.75 * (NCOLORS * NCOLORS - 1);
+constexpr double k_test_beta = 0.75 * (NCOLORS * NCOLORS - 1);
 
 /// Fill proc_grid with 1s, then set proc_grid[split_dim] = nproc_along_dim.
-inline void fill_proc_grid(int proc_grid[NDIMS], int split_dim,
+inline void fillProcGrid(int proc_grid[NDIMS], int split_dim,
                            int nproc_along_dim = 2) {
   for (int d = 0; d < NDIMS; ++d) {
     proc_grid[d] = 1;
@@ -42,7 +42,7 @@ inline void fill_proc_grid(int proc_grid[NDIMS], int split_dim,
   proc_grid[split_dim] = nproc_along_dim;
 }
 
-template <typename Real> bool test_complex() {
+template <typename Real> bool testComplex() {
   printf("Testing Complex<Real>...\n");
 
   Complex<Real> a(3, 4);
@@ -79,7 +79,7 @@ template <typename Real> bool test_complex() {
   return true;
 }
 
-bool test_halo_slot_roundtrip() {
+bool testHaloSlotRoundtrip() {
   printf("Testing halo region slot layout round-trip...\n");
 
   LatticeParams p;
@@ -91,12 +91,12 @@ bool test_halo_slot_roundtrip() {
   }
   p.half_volume = p.volume / 2;
 
-  for (int code = 0; code < HALO_CODE_COUNT; ++code) {
-    if (code == HALO_CENTER_CODE) {
+  for (int code = 0; code < halo_code_count; ++code) {
+    if (code == halo_center_code) {
       continue;
     }
     int off[NDIMS];
-    halo_code_to_offset(code, off);
+    haloCodeToOffset(code, off);
     int nnz = 0;
     for (int d = 0; d < NDIMS; ++d) {
       nnz += (off[d] != 0);
@@ -104,13 +104,13 @@ bool test_halo_slot_roundtrip() {
     if (nnz == 0 || nnz > 2) {
       continue;
     }
-    const int64_t vol = halo_region_volume(off, p);
-    const int sdim = halo_region_split_dim(off, p);
+    const int64_t vol = haloRegionVolume(off, p);
+    const int sdim = haloRegionSplitDim(off, p);
     std::vector<char> seen(static_cast<size_t>(vol), 0);
     int x[NDIMS];
     auto walk = [&](auto &&self, int dim) -> bool {
       if (dim == NDIMS) {
-        const int64_t slot = halo_region_slot(off, x, sdim, vol, p);
+        const int64_t slot = haloRegionSlot(off, x, sdim, vol, p);
         if (slot < 0 || slot >= vol) {
           printf("  FAILED: slot %lld out of range (vol %lld)\n",
                  static_cast<long long>(slot), static_cast<long long>(vol));
@@ -123,7 +123,7 @@ bool test_halo_slot_roundtrip() {
         }
         seen[static_cast<size_t>(slot)] = 1;
         int y[NDIMS];
-        halo_slot_to_coords(off, sdim, vol, slot, y, p);
+        haloSlotToCoords(off, sdim, vol, slot, y, p);
         for (int d = 0; d < NDIMS; ++d) {
           if (y[d] != x[d]) {
             printf("  FAILED: inverse mismatch at slot %lld dim %d "
@@ -162,18 +162,18 @@ bool test_halo_slot_roundtrip() {
   return true;
 }
 
-template <typename Real> bool test_matrix() {
+template <typename Real> bool testMatrix() {
   printf("Testing MatrixSun<Real, %d>...\n", NCOLORS);
 
   using Matrix = MatrixSun<Real, NCOLORS>;
 
   // Test identity
-  Matrix I = Matrix::identity();
+  Matrix ident = Matrix::identity();
   for (int i = 0; i < NCOLORS; ++i) {
     for (int j = 0; j < NCOLORS; ++j) {
       Real expected_re = (i == j) ? Real(1) : Real(0);
-      if (std::abs(I.e[i][j].real() - expected_re) > 1e-10 ||
-          std::abs(I.e[i][j].imag()) > 1e-10) {
+      if (std::abs(ident.e[i][j].real() - expected_re) > 1e-10 ||
+          std::abs(ident.e[i][j].imag()) > 1e-10) {
         printf("  FAILED: identity\n");
         return false;
       }
@@ -181,18 +181,18 @@ template <typename Real> bool test_matrix() {
   }
 
   // Test multiplication by identity
-  Matrix A;
+  Matrix a;
   for (int i = 0; i < NCOLORS; ++i) {
     for (int j = 0; j < NCOLORS; ++j) {
-      A.e[i][j] = Complex<Real>(i + j, i - j);
+      a.e[i][j] = Complex<Real>(i + j, i - j);
     }
   }
 
-  Matrix B = A * I;
+  Matrix b = a * ident;
   for (int i = 0; i < NCOLORS; ++i) {
     for (int j = 0; j < NCOLORS; ++j) {
-      if (std::abs(B.e[i][j].real() - A.e[i][j].real()) > 1e-10 ||
-          std::abs(B.e[i][j].imag() - A.e[i][j].imag()) > 1e-10) {
+      if (std::abs(b.e[i][j].real() - a.e[i][j].real()) > 1e-10 ||
+          std::abs(b.e[i][j].imag() - a.e[i][j].imag()) > 1e-10) {
         printf("  FAILED: multiplication by identity\n");
         return false;
       }
@@ -200,18 +200,18 @@ template <typename Real> bool test_matrix() {
   }
 
   // Test trace
-  Complex<Real> tr = I.trace();
+  Complex<Real> tr = ident.trace();
   if (std::abs(tr.real() - NCOLORS) > 1e-10 || std::abs(tr.imag()) > 1e-10) {
     printf("  FAILED: trace\n");
     return false;
   }
 
   // Test dagger
-  Matrix Ad = A.dagger();
+  Matrix ad = a.dagger();
   for (int i = 0; i < NCOLORS; ++i) {
     for (int j = 0; j < NCOLORS; ++j) {
-      if (std::abs(Ad.e[i][j].real() - A.e[j][i].real()) > 1e-10 ||
-          std::abs(Ad.e[i][j].imag() + A.e[j][i].imag()) > 1e-10) {
+      if (std::abs(ad.e[i][j].real() - a.e[j][i].real()) > 1e-10 ||
+          std::abs(ad.e[i][j].imag() + a.e[j][i].imag()) > 1e-10) {
         printf("  FAILED: dagger\n");
         return false;
       }
@@ -219,19 +219,19 @@ template <typename Real> bool test_matrix() {
   }
 
   // Non-trivial products. A*I only touches the k=0 term of a general GEMM.
-  Matrix Bm;
+  Matrix bm;
   for (int i = 0; i < NCOLORS; ++i) {
     for (int j = 0; j < NCOLORS; ++j) {
-      Bm.e[i][j] =
+      bm.e[i][j] =
           Complex<Real>(Real(0.1) * (i + 2 * j + 1), Real(0.05) * (i - j));
     }
   }
-  auto max_abs = [](const Matrix &X, const Matrix &Y) {
+  auto max_abs = [](const Matrix &x, const Matrix &y) {
     Real m = Real(0);
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
-        const Real dr = std::abs(X.e[i][j].real() - Y.e[i][j].real());
-        const Real di = std::abs(X.e[i][j].imag() - Y.e[i][j].imag());
+        const Real dr = std::abs(x.e[i][j].real() - y.e[i][j].real());
+        const Real di = std::abs(x.e[i][j].imag() - y.e[i][j].imag());
         if (dr > m) {
           m = dr;
         }
@@ -247,12 +247,12 @@ template <typename Real> bool test_matrix() {
     for (int j = 0; j < NCOLORS; ++j) {
       Complex<Real> s = Complex<Real>::zero();
       for (int k = 0; k < NCOLORS; ++k) {
-        s += A.e[i][k] * Bm.e[k][j];
+        s += a.e[i][k] * bm.e[k][j];
       }
       ref.e[i][j] = s;
     }
   }
-  if (max_abs(A * Bm, ref) > Real(1e-9)) {
+  if (max_abs(a * bm, ref) > Real(1e-9)) {
     printf("  FAILED: A*B\n");
     return false;
   }
@@ -262,12 +262,12 @@ template <typename Real> bool test_matrix() {
     for (int j = 0; j < NCOLORS; ++j) {
       Complex<Real> s = Complex<Real>::zero();
       for (int k = 0; k < NCOLORS; ++k) {
-        s += A.e[i][k] * ~Bm.e[j][k];
+        s += a.e[i][k] * ~bm.e[j][k];
       }
       ref_ud.e[i][j] = s;
     }
   }
-  if (max_abs(UUDagger(A, Bm), ref_ud) > Real(1e-9)) {
+  if (max_abs(uuDagger(a, bm), ref_ud) > Real(1e-9)) {
     printf("  FAILED: A*B^H\n");
     return false;
   }
@@ -277,12 +277,12 @@ template <typename Real> bool test_matrix() {
     for (int j = 0; j < NCOLORS; ++j) {
       Complex<Real> s = Complex<Real>::zero();
       for (int k = 0; k < NCOLORS; ++k) {
-        s += ~A.e[k][i] * Bm.e[k][j];
+        s += ~a.e[k][i] * bm.e[k][j];
       }
       ref_du.e[i][j] = s;
     }
   }
-  if (max_abs(UDaggerU(A, Bm), ref_du) > Real(1e-9)) {
+  if (max_abs(uDaggerU(a, bm), ref_du) > Real(1e-9)) {
     printf("  FAILED: A^H*B\n");
     return false;
   }
@@ -292,17 +292,17 @@ template <typename Real> bool test_matrix() {
   Kokkos::parallel_reduce(
       "test_sun_gemm", 1,
       KOKKOS_LAMBDA(const int, Real &err) {
-        const Matrix C = A * Bm;
-        const Matrix UD = UUDagger(A, Bm);
-        const Matrix DU = UDaggerU(A, Bm);
+        const Matrix c = a * bm;
+        const Matrix ud = uuDagger(a, bm);
+        const Matrix du = uDaggerU(a, bm);
         for (int i = 0; i < NCOLORS; ++i) {
           for (int j = 0; j < NCOLORS; ++j) {
-            err += Kokkos::abs(C.e[i][j].real() - ref.e[i][j].real());
-            err += Kokkos::abs(C.e[i][j].imag() - ref.e[i][j].imag());
-            err += Kokkos::abs(UD.e[i][j].real() - ref_ud.e[i][j].real());
-            err += Kokkos::abs(UD.e[i][j].imag() - ref_ud.e[i][j].imag());
-            err += Kokkos::abs(DU.e[i][j].real() - ref_du.e[i][j].real());
-            err += Kokkos::abs(DU.e[i][j].imag() - ref_du.e[i][j].imag());
+            err += Kokkos::abs(c.e[i][j].real() - ref.e[i][j].real());
+            err += Kokkos::abs(c.e[i][j].imag() - ref.e[i][j].imag());
+            err += Kokkos::abs(ud.e[i][j].real() - ref_ud.e[i][j].real());
+            err += Kokkos::abs(ud.e[i][j].imag() - ref_ud.e[i][j].imag());
+            err += Kokkos::abs(du.e[i][j].real() - ref_du.e[i][j].real());
+            err += Kokkos::abs(du.e[i][j].imag() - ref_du.e[i][j].imag());
           }
         }
       },
@@ -316,11 +316,11 @@ template <typename Real> bool test_matrix() {
   return true;
 }
 
-template <typename Real> bool test_gauge_io_roundtrip() {
+template <typename Real> bool testGaugeIoRoundtrip() {
   printf("Testing gauge configuration I/O round-trip...\n");
 
   std::vector<int> lattice_size(NDIMS, 4);
-  reset_and_initialize_params(lattice_size, 6.0);
+  resetAndInitializeParams(lattice_size, 6.0);
   auto &params = PARAMS::params;
 
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
@@ -342,8 +342,8 @@ template <typename Real> bool test_gauge_io_roundtrip() {
   const Real plaq_before = plaq.value();
 
   const std::string filename = "test_io_roundtrip.bin";
-  save_gauge_binary<Real, Real>(gauge, filename, false);
-  load_gauge_binary<Real, Real>(gauge, filename, false);
+  saveGaugeBinary<Real, Real>(gauge, filename, false);
+  loadGaugeBinary<Real, Real>(gauge, filename, false);
 
   plaq.run();
   const Real plaq_after = plaq.value();
@@ -366,12 +366,12 @@ template <typename Real> bool test_gauge_io_roundtrip() {
   return true;
 }
 
-template <typename Real> bool test_gauge_cold_start() {
+template <typename Real> bool testGaugeColdStart() {
   printf("Testing GaugeArray cold start...\n");
 
   // Create a small lattice
   std::vector<int> lattice_size(NDIMS, 4);
-  reset_and_initialize_params(lattice_size, 6.0);
+  resetAndInitializeParams(lattice_size, 6.0);
   auto &params = PARAMS::params;
 
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
@@ -395,13 +395,13 @@ template <typename Real> bool test_gauge_cold_start() {
   return true;
 }
 
-template <typename Real> bool test_heatbath_thermalization() {
+template <typename Real> bool testHeatbathThermalization() {
   printf("Testing HeatBath thermalization...\n");
 
   // Create a small lattice
   std::vector<int> lattice_size(NDIMS, 4);
-  double beta = kTestBeta;
-  reset_and_initialize_params(lattice_size, beta);
+  double beta = k_test_beta;
+  resetAndInitializeParams(lattice_size, beta);
   auto &params = PARAMS::params;
 
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
@@ -436,11 +436,11 @@ template <typename Real> bool test_heatbath_thermalization() {
   return true;
 }
 
-template <typename Real> bool test_overrelaxation_trajectory() {
+template <typename Real> bool testOverrelaxationTrajectory() {
   printf("Testing HeatBath + Overrelaxation trajectory...\n");
 
   std::vector<int> lattice_size(NDIMS, 4);
-  reset_and_initialize_params(lattice_size, kTestBeta);
+  resetAndInitializeParams(lattice_size, k_test_beta);
   auto &params = PARAMS::params;
 
   GaugeArray<Real> gauge(ArrayType::SOA, MemoryLocation::Device,
@@ -508,7 +508,7 @@ bool test_site_simd_vs_scalar_case(const std::vector<int> &lattice,
                                    ArrayType atype) {
   using Simd = SiteSimd<Real>;
   constexpr int W = static_cast<int>(Simd::size());
-  reset_and_initialize_params(lattice, kTestBeta);
+  resetAndInitializeParams(lattice, k_test_beta);
   const LatticeParams params = PARAMS::params;
   const int64_t half = params.half_volume;
 
@@ -524,7 +524,7 @@ bool test_site_simd_vs_scalar_case(const std::vector<int> &lattice,
   }
   Kokkos::fence();
   const int64_t stride = gauge.size();
-  const int64_t n = static_cast<int64_t>(gauge_complex_elems(atype)) * stride;
+  const int64_t n = static_cast<int64_t>(gaugeComplexElems(atype)) * stride;
   const std::vector<Complex<Real>> init(gauge.data(), gauge.data() + n);
 
   double staple_err = 0, or_err = 0, hb_err = 0;
@@ -576,7 +576,7 @@ bool test_site_simd_vs_scalar_case(const std::vector<int> &lattice,
         }
         // A rounding-level difference can flip one accept/reject test in the
         // SU(2) sampler; that link then takes a different (valid) value.
-        const int64_t elems = gauge_complex_elems(atype);
+        const int64_t elems = gaugeComplexElems(atype);
         for (int64_t k = 0; k < stride; ++k) {
           double d = 0;
           for (int64_t e = 0; e < elems; ++e) {
@@ -647,9 +647,9 @@ template <typename Real> bool test_site_simd_vs_scalar() {
 #endif
 
 #ifdef KWQFT_USE_MPI
-template <typename Real> bool test_mpi_gauge_io_roundtrip() {
-  const int nproc = mpi_comm_size();
-  const int rank = mpi_comm_rank();
+template <typename Real> bool testMpiGaugeIoRoundtrip() {
+  const int nproc = mpiCommSize();
+  const int rank = mpiCommRank();
 
   if (nproc < 2) {
     if (rank == 0) {
@@ -671,7 +671,7 @@ template <typename Real> bool test_mpi_gauge_io_roundtrip() {
   }
 
   int proc_grid[NDIMS];
-  fill_proc_grid(proc_grid, 0, 2); // split along x
+  fillProcGrid(proc_grid, 0, 2); // split along x
   std::vector<int> global_lattice(NDIMS, 4);
   int global_lattice_arr[NDIMS];
   for (int d = 0; d < NDIMS; ++d) {
@@ -681,7 +681,7 @@ template <typename Real> bool test_mpi_gauge_io_roundtrip() {
   if (PARAMS::initialized) {
     finalizeParams();
   }
-  mpi_setup_cartesian(proc_grid, global_lattice_arr);
+  mpiSetupCartesian(proc_grid, global_lattice_arr);
   std::vector<int> pg(proc_grid, proc_grid + NDIMS);
   initializeParamsDistributed(global_lattice, pg, 6.0, false);
 
@@ -707,8 +707,8 @@ template <typename Real> bool test_mpi_gauge_io_roundtrip() {
   const Real plaq_before = plaq.value();
 
   const std::string filename = "test_mpi_io_roundtrip.bin";
-  save_gauge_binary<Real, Real>(gauge, filename, false);
-  load_gauge_binary<Real, Real>(gauge, filename, false);
+  saveGaugeBinary<Real, Real>(gauge, filename, false);
+  loadGaugeBinary<Real, Real>(gauge, filename, false);
 
   plaq.run();
   const Real plaq_after = plaq.value();
@@ -737,9 +737,9 @@ template <typename Real> bool test_mpi_gauge_io_roundtrip() {
   return ok_int != 0;
 }
 
-template <typename Real> bool test_mpi_polyakov_time_split() {
-  const int nproc = mpi_comm_size();
-  const int rank = mpi_comm_rank();
+template <typename Real> bool testMpiPolyakovTimeSplit() {
+  const int nproc = mpiCommSize();
+  const int rank = mpiCommRank();
 
   if (nproc < 2) {
     if (rank == 0) {
@@ -761,7 +761,7 @@ template <typename Real> bool test_mpi_polyakov_time_split() {
   }
 
   int proc_grid[NDIMS];
-  fill_proc_grid(proc_grid, NDIMS - 1, 2); // split along time
+  fillProcGrid(proc_grid, NDIMS - 1, 2); // split along time
   std::vector<int> global_lattice(NDIMS, 4);
   global_lattice[NDIMS - 1] = 8;
   int global_lattice_arr[NDIMS];
@@ -772,7 +772,7 @@ template <typename Real> bool test_mpi_polyakov_time_split() {
   if (PARAMS::initialized) {
     finalizeParams();
   }
-  mpi_setup_cartesian(proc_grid, global_lattice_arr);
+  mpiSetupCartesian(proc_grid, global_lattice_arr);
   std::vector<int> pg(proc_grid, proc_grid + NDIMS);
   initializeParamsDistributed(global_lattice, pg, 6.0, false);
 
@@ -820,9 +820,9 @@ template <typename Real> bool test_mpi_polyakov_time_split() {
   return ok_int != 0;
 }
 
-template <typename Real> bool test_mpi_shift_heatbath() {
-  const int nproc = mpi_comm_size();
-  const int rank = mpi_comm_rank();
+template <typename Real> bool testMpiShiftHeatbath() {
+  const int nproc = mpiCommSize();
+  const int rank = mpiCommRank();
 
   if (nproc < 2) {
     if (rank == 0) {
@@ -844,7 +844,7 @@ template <typename Real> bool test_mpi_shift_heatbath() {
   }
 
   int proc_grid[NDIMS];
-  fill_proc_grid(proc_grid, 0, 2); // split along x
+  fillProcGrid(proc_grid, 0, 2); // split along x
   std::vector<int> global_lattice(NDIMS, 8);
   int global_lattice_arr[NDIMS];
   for (int d = 0; d < NDIMS; ++d) {
@@ -854,9 +854,9 @@ template <typename Real> bool test_mpi_shift_heatbath() {
   if (PARAMS::initialized) {
     finalizeParams();
   }
-  mpi_setup_cartesian(proc_grid, global_lattice_arr);
+  mpiSetupCartesian(proc_grid, global_lattice_arr);
   std::vector<int> pg(proc_grid, proc_grid + NDIMS);
-  initializeParamsDistributed(global_lattice, pg, kTestBeta, false);
+  initializeParamsDistributed(global_lattice, pg, k_test_beta, false);
 
   auto &params = PARAMS::params;
 
@@ -904,10 +904,10 @@ int main(int argc, char *argv[]) {
 
   int passed = 0;
   int failed = 0;
-  const bool is_primary = (mpi_comm_rank() == 0);
+  const bool is_primary = (mpiCommRank() == 0);
 
 #ifdef KWQFT_USE_MPI
-  const bool run_serial_suite = (mpi_comm_size() == 1) && is_primary;
+  const bool run_serial_suite = (mpiCommSize() == 1) && is_primary;
 #else
   const bool run_serial_suite = true;
 #endif
@@ -920,31 +920,31 @@ int main(int argc, char *argv[]) {
   }
 
   if (run_serial_suite) {
-    if (test_halo_slot_roundtrip())
+    if (testHaloSlotRoundtrip())
       passed++;
     else
       failed++;
-    if (test_complex<double>())
+    if (testComplex<double>())
       passed++;
     else
       failed++;
-    if (test_matrix<double>())
+    if (testMatrix<double>())
       passed++;
     else
       failed++;
-    if (test_gauge_io_roundtrip<double>())
+    if (testGaugeIoRoundtrip<double>())
       passed++;
     else
       failed++;
-    if (test_gauge_cold_start<double>())
+    if (testGaugeColdStart<double>())
       passed++;
     else
       failed++;
-    if (test_heatbath_thermalization<double>())
+    if (testHeatbathThermalization<double>())
       passed++;
     else
       failed++;
-    if (test_overrelaxation_trajectory<double>())
+    if (testOverrelaxationTrajectory<double>())
       passed++;
     else
       failed++;
@@ -957,16 +957,16 @@ int main(int argc, char *argv[]) {
   }
 
 #ifdef KWQFT_USE_MPI
-  if (mpi_comm_size() > 1) {
-    if (test_mpi_gauge_io_roundtrip<double>())
+  if (mpiCommSize() > 1) {
+    if (testMpiGaugeIoRoundtrip<double>())
       passed++;
     else
       failed++;
-    if (test_mpi_polyakov_time_split<double>())
+    if (testMpiPolyakovTimeSplit<double>())
       passed++;
     else
       failed++;
-    if (test_mpi_shift_heatbath<double>())
+    if (testMpiShiftHeatbath<double>())
       passed++;
     else
       failed++;
@@ -981,7 +981,7 @@ int main(int argc, char *argv[]) {
 
   int exit_code = failed > 0 ? 1 : 0;
 #ifdef KWQFT_USE_MPI
-  if (mpi_comm_size() > 1) {
+  if (mpiCommSize() > 1) {
     MPI_Bcast(&exit_code, 1, MPI_INT, 0, MPI_COMM_WORLD);
   }
 #endif

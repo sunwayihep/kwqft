@@ -34,17 +34,17 @@ namespace kwqft {
  * @brief Initialize KWQFT library
  *
  * This function also takes care of `Kokkos::initialize()` and (when built
- * with MPI) `mpi_env_init()`, so main() can stay compact.
+ * with MPI) `mpiEnvInit()`, so main() can stay compact.
  */
 inline void initialize(int argc = 0, char *argv[] = nullptr) {
 #ifdef KWQFT_USE_MPI
-  mpi_env_init(&argc, &argv);
+  mpiEnvInit(&argc, &argv);
 #endif
 
   Kokkos::initialize(argc, argv);
 
   // Print library info
-  if (mpi_comm_rank() == 0) {
+  if (mpiCommRank() == 0) {
     printf("==========================================================\n");
     printf("KWQFT - Kokkos Ken Wilson Quantum Field Theory Library\n");
     printf("SU(%d) gauge theory in %d dimensions\n", NCOLORS, NDIMS);
@@ -66,19 +66,19 @@ inline void initialize(int argc = 0, char *argv[] = nullptr) {
  * @brief Finalize KWQFT library
  *
  * This function calls `finalizeParams()`, then (when built with MPI)
- * `mpi_env_finalize()`, and finally `Kokkos::finalize()`.
+ * `mpiEnvFinalize()`, and finally `Kokkos::finalize()`.
  */
 inline void finalize() {
   // Release Kokkos views before Kokkos::finalize()
   finalizeParams();
-  if (mpi_comm_rank() == 0) {
+  if (mpiCommRank() == 0) {
     printf("==========================================================\n");
     printf("KWQFT finalized\n");
     printf("==========================================================\n");
   }
 
 #ifdef KWQFT_USE_MPI
-  mpi_env_finalize();
+  mpiEnvFinalize();
 #endif
 
   Kokkos::finalize();
@@ -90,37 +90,37 @@ inline void finalize() {
 class Timer {
 private:
   Kokkos::Timer time_r;
-  double elapsed_;
-  bool running_;
+  double m_elapsed;
+  bool running;
 
 public:
-  Timer() : elapsed_(0), running_(false) {}
+  Timer() : m_elapsed(0), running(false) {}
 
   void start() {
     time_r.reset();
-    running_ = true;
+    running = true;
   }
 
   void stop() {
-    if (running_) {
-      elapsed_ = time_r.seconds();
-      running_ = false;
+    if (running) {
+      m_elapsed = time_r.seconds();
+      running = false;
     }
   }
 
   void reset() {
-    elapsed_ = 0;
-    running_ = false;
+    m_elapsed = 0;
+    running = false;
   }
 
   double elapsed() const {
-    if (running_) {
+    if (running) {
       return time_r.seconds();
     }
-    return elapsed_;
+    return m_elapsed;
   }
 
-  double get_elapsed_time() const { return elapsed(); }
+  double getElapsedTime() const { return elapsed(); }
 };
 
 } // namespace kwqft

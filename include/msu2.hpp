@@ -96,7 +96,7 @@ public:
 
   // Conjugate and normalize
   KOKKOS_INLINE_FUNCTION
-  Msu2 conj_normalize() const {
+  Msu2 conjNormalize() const {
     Real norm = Real(1) / abs();
     return Msu2(m_a[0] * norm, -m_a[1] * norm, -m_a[2] * norm, -m_a[3] * norm);
   }
@@ -150,9 +150,6 @@ KOKKOS_INLINE_FUNCTION Msu2<Real> mulsu2UVDagger(const Msu2<Real> &u,
       -u.a0() * v.a2() - u.a1() * v.a3() + u.a2() * v.a0() + u.a3() * v.a1(),
       -u.a0() * v.a3() + u.a1() * v.a2() - u.a2() * v.a1() + u.a3() * v.a0());
 }
-
-// Type alias
-template <typename Real> using msu2 = Msu2<Real>;
 
 } // namespace kwqft
 

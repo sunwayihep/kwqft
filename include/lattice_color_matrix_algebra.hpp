@@ -25,16 +25,16 @@ namespace kwqft {
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
 loadLatticeColorMatrix(const LatticeColorMatrix<Real> &field, int64_t idx_eo,
-                       const LatticeParams &p, MatrixSun<Real, NCOLORS> &U,
+                       const LatticeParams &p, MatrixSun<Real, NCOLORS> &u,
                        const GaugeHaloDevice<Real> *halo = nullptr) {
-  field.load_at(idx_eo, p, halo, U);
+  field.loadAt(idx_eo, p, halo, u);
 }
 
 /// Hermitian conjugate view (zero-copy).
 template <typename Real>
 KOKKOS_INLINE_FUNCTION LatticeColorMatrix<Real>
 adj(const LatticeColorMatrix<Real> &in, const char * /*label*/ = nullptr) {
-  return in.with_adjoint();
+  return in.withAdjoint();
 }
 
 /// Product of N lattice color-matrix views.
@@ -43,14 +43,14 @@ template <typename Real, int N> struct LcmProduct {
   LatticeColorMatrix<Real> f[N]{};
 
   KOKKOS_INLINE_FUNCTION
-  void eval_at(int64_t idx_eo, const LatticeParams &p,
+  void evalAt(int64_t idx_eo, const LatticeParams &p,
                const GaugeHaloDevice<Real> *halo,
-               MatrixSun<Real, NCOLORS> &U) const {
-    f[0].load_at(idx_eo, p, halo, U);
+               MatrixSun<Real, NCOLORS> &u) const {
+    f[0].loadAt(idx_eo, p, halo, u);
     for (int i = 1; i < N; ++i) {
-      MatrixSun<Real, NCOLORS> Ui;
-      f[i].load_at(idx_eo, p, halo, Ui);
-      U = U * Ui;
+      MatrixSun<Real, NCOLORS> ui;
+      f[i].loadAt(idx_eo, p, halo, ui);
+      u = u * ui;
     }
   }
 };
@@ -96,18 +96,18 @@ Real realTraceSum(const LatticeColorMatrix<Real> &field,
                   const char *label = "realTraceSum",
                   const GaugeHaloDevice<Real> *halo = nullptr) {
   const int64_t vol = PARAMS::params.volume;
-  auto dparams = get_device_params();
+  auto dparams = getDeviceParams();
   const GaugeHaloDevice<Real> halo_cap = halo ? *halo : GaugeHaloDevice<Real>{};
   const bool have_halo = halo != nullptr;
   Real sum = 0;
 
   Kokkos::parallel_reduce(
-      label, range_policy(0, vol),
+      label, RangePolicy(0, vol),
       KOKKOS_LAMBDA(const int64_t idx_eo, Real &s) {
         const LatticeParams p = dparams();
         const GaugeHaloDevice<Real> *hp = have_halo ? &halo_cap : nullptr;
         MatrixSun<Real, NCOLORS> U;
-        field.load_at(idx_eo, p, hp, U);
+        field.loadAt(idx_eo, p, hp, U);
         s += U.realtrace();
       },
       sum);
@@ -119,18 +119,18 @@ Real realTraceSum(const LcmProduct<Real, N> &prod,
                   const char *label = "realTraceSum",
                   const GaugeHaloDevice<Real> *halo = nullptr) {
   const int64_t vol = PARAMS::params.volume;
-  auto dparams = get_device_params();
+  auto dparams = getDeviceParams();
   const GaugeHaloDevice<Real> halo_cap = halo ? *halo : GaugeHaloDevice<Real>{};
   const bool have_halo = halo != nullptr;
   Real sum = 0;
 
   Kokkos::parallel_reduce(
-      label, range_policy(0, vol),
+      label, RangePolicy(0, vol),
       KOKKOS_LAMBDA(const int64_t idx_eo, Real &s) {
         const LatticeParams p = dparams();
         const GaugeHaloDevice<Real> *hp = have_halo ? &halo_cap : nullptr;
         MatrixSun<Real, NCOLORS> U;
-        prod.eval_at(idx_eo, p, hp, U);
+        prod.evalAt(idx_eo, p, hp, U);
         s += U.realtrace();
       },
       sum);

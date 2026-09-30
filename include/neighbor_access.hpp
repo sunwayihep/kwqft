@@ -13,13 +13,13 @@
 
 namespace kwqft {
 
-constexpr int halo_pow3_constexpr(int n) {
-  return (n <= 0) ? 1 : 3 * halo_pow3_constexpr(n - 1);
+constexpr int haloPow3Constexpr(int n) {
+  return (n <= 0) ? 1 : 3 * haloPow3Constexpr(n - 1);
 }
-constexpr int HALO_CODE_COUNT = halo_pow3_constexpr(NDIMS);
-constexpr int HALO_CENTER_CODE = (HALO_CODE_COUNT - 1) / 2;
+constexpr int halo_code_count = haloPow3Constexpr(NDIMS);
+constexpr int halo_center_code = (halo_code_count - 1) / 2;
 
-KOKKOS_INLINE_FUNCTION int halo_offset_to_code(const int off[NDIMS]) {
+KOKKOS_INLINE_FUNCTION int haloOffsetToCode(const int off[NDIMS]) {
   int code = 0;
   int mult = 1;
   for (int d = 0; d < NDIMS; ++d) {
@@ -29,7 +29,7 @@ KOKKOS_INLINE_FUNCTION int halo_offset_to_code(const int off[NDIMS]) {
   return code;
 }
 
-KOKKOS_INLINE_FUNCTION void halo_code_to_offset(int code, int off[NDIMS]) {
+KOKKOS_INLINE_FUNCTION void haloCodeToOffset(int code, int off[NDIMS]) {
   int t = code;
   for (int d = 0; d < NDIMS; ++d) {
     const int digit = t % 3;
@@ -38,7 +38,7 @@ KOKKOS_INLINE_FUNCTION void halo_code_to_offset(int code, int off[NDIMS]) {
   }
 }
 
-KOKKOS_INLINE_FUNCTION int64_t halo_region_volume(const int off[NDIMS],
+KOKKOS_INLINE_FUNCTION int64_t haloRegionVolume(const int off[NDIMS],
                                                   const LatticeParams &p) {
   int64_t vol = 1;
   for (int d = 0; d < NDIMS; ++d) {
@@ -56,7 +56,7 @@ KOKKOS_INLINE_FUNCTION int64_t halo_region_volume(const int off[NDIMS],
  * checkerboard update. Returns the first free dimension, or -1 if the region
  * cannot be split (odd first free extent; region is then stored site-major).
  */
-KOKKOS_INLINE_FUNCTION int halo_region_split_dim(const int off[NDIMS],
+KOKKOS_INLINE_FUNCTION int haloRegionSplitDim(const int off[NDIMS],
                                                  const LatticeParams &p) {
   for (int d = 0; d < NDIMS; ++d) {
     if (off[d] == 0) {
@@ -73,7 +73,7 @@ KOKKOS_INLINE_FUNCTION int halo_region_split_dim(const int off[NDIMS],
  * where \p rest is the mixed-radix index over the remaining free dims.
  * Non-split: plain mixed-radix index over all free dims.
  */
-KOKKOS_INLINE_FUNCTION int64_t halo_region_slot(const int off[NDIMS],
+KOKKOS_INLINE_FUNCTION int64_t haloRegionSlot(const int off[NDIMS],
                                                 const int x[NDIMS],
                                                 int split_dim, int64_t vol,
                                                 const LatticeParams &p) {
@@ -112,7 +112,7 @@ KOKKOS_INLINE_FUNCTION int64_t halo_region_slot(const int off[NDIMS],
  * Coordinates on the fixed (off != 0) dims are set to the *local* face value
  * (0 for +1, grid-1 for -1), i.e. the sender-side convention used by pack.
  */
-KOKKOS_INLINE_FUNCTION void halo_slot_to_coords(const int off[NDIMS],
+KOKKOS_INLINE_FUNCTION void haloSlotToCoords(const int off[NDIMS],
                                                 int split_dim, int64_t vol,
                                                 int64_t slot, int x[NDIMS],
                                                 const LatticeParams &p) {
@@ -158,9 +158,9 @@ KOKKOS_INLINE_FUNCTION void halo_slot_to_coords(const int off[NDIMS],
 /// with \p slot from \ref halo_region_slot, so one link direction (and, for
 /// parity-split regions, one (dir, parity) block) is contiguous.
 template <typename Real> struct GaugeHaloDevice {
-  const Complex<Real> *recv[HALO_CODE_COUNT]{};
-  int64_t vol[HALO_CODE_COUNT]{};
-  int split_dim[HALO_CODE_COUNT]{};
+  const Complex<Real> *recv[halo_code_count]{};
+  int64_t vol[halo_code_count]{};
+  int split_dim[halo_code_count]{};
 };
 
 /**
@@ -180,10 +180,10 @@ template <typename Real> struct GaugeLinkRef {
 
 template <typename Real>
 KOKKOS_INLINE_FUNCTION GaugeLinkRef<Real>
-gaugeLinkRefSoa(const Complex<Real> *gaugePtr, int64_t idx_eo, int dir,
+gaugeLinkRefSoa(const Complex<Real> *gauge_ptr, int64_t idx_eo, int dir,
                 int64_t soa_stride, const LatticeParams &p, ArrayType atype) {
   GaugeLinkRef<Real> r;
-  r.ptr = gaugePtr + idx_eo + static_cast<int64_t>(dir) * p.volume;
+  r.ptr = gauge_ptr + idx_eo + static_cast<int64_t>(dir) * p.volume;
   r.stride = soa_stride;
   r.soa12 = (NCOLORS == 3) && (atype == ArrayType::SOA12);
   return r;
@@ -206,25 +206,25 @@ gaugeLinkRefGhost(const Complex<Real> *buf, int64_t face_vol, int64_t slot,
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void loadGaugeLinkRef(const GaugeLinkRef<Real> &ref,
                                              bool adjoint,
-                                             MatrixSun<Real, NCOLORS> &U) {
+                                             MatrixSun<Real, NCOLORS> &u) {
   if constexpr (NCOLORS == 3) {
     if (ref.soa12) {
-      loadGaugeMatrix(ref.ptr, int64_t(0), ref.stride, ArrayType::SOA12, U,
+      loadGaugeMatrix(ref.ptr, int64_t(0), ref.stride, ArrayType::SOA12, u,
                       adjoint);
       return;
     }
   }
-  loadMatrixStrided(ref.ptr, ref.stride, adjoint, U);
+  loadMatrixStrided(ref.ptr, ref.stride, adjoint, u);
 }
 
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
 loadGhostFaceLink(const Complex<Real> *buf, int64_t face_vol, int64_t slot,
-                  int dir, MatrixSun<Real, NCOLORS> &U) {
-  loadGaugeLinkRef(gaugeLinkRefGhost(buf, face_vol, slot, dir), false, U);
+                  int dir, MatrixSun<Real, NCOLORS> &u) {
+  loadGaugeLinkRef(gaugeLinkRefGhost(buf, face_vol, slot, dir), false, u);
 }
 
-KOKKOS_INLINE_FUNCTION void eo_to_coords(int64_t id, int oddbit, int x[NDIMS],
+KOKKOS_INLINE_FUNCTION void eoToCoords(int64_t id, int oddbit, int x[NDIMS],
                                          const LatticeParams &p) {
   indexNdEo(x, id, oddbit, p);
 }
@@ -239,7 +239,7 @@ KOKKOS_INLINE_FUNCTION void eo_to_coords(int64_t id, int oddbit, int x[NDIMS],
  */
 template <typename Real>
 KOKKOS_INLINE_FUNCTION GaugeLinkRef<Real>
-resolveGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
+resolveGaugeLinkAtCoords(const Complex<Real> *gauge_ptr, int64_t soa_stride,
                          const GaugeHaloDevice<Real> *halo, const int x[NDIMS],
                          int dir, const LatticeParams &p,
                          ArrayType atype = ArrayType::SOA) {
@@ -274,36 +274,36 @@ resolveGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
   }
 
   if (!need_halo) {
-    const int64_t idx_eo = coords_to_eo_idx(xw, p);
-    return gaugeLinkRefSoa(gaugePtr, idx_eo, dir, soa_stride, p, atype);
+    const int64_t idx_eo = coordsToEoIdx(xw, p);
+    return gaugeLinkRefSoa(gauge_ptr, idx_eo, dir, soa_stride, p, atype);
   }
 
   if (halo == nullptr) {
     return GaugeLinkRef<Real>{}; // zero matrix
   }
 
-  const int code = halo_offset_to_code(off);
+  const int code = haloOffsetToCode(off);
   const Complex<Real> *buf = halo->recv[code];
   if (buf == nullptr) {
     return GaugeLinkRef<Real>{}; // zero matrix
   }
 
   const int64_t vol = halo->vol[code];
-  const int64_t slot = halo_region_slot(off, xw, halo->split_dim[code], vol, p);
+  const int64_t slot = haloRegionSlot(off, xw, halo->split_dim[code], vol, p);
   return gaugeLinkRefGhost(buf, vol, slot, dir);
 }
 
 /// \ref resolveGaugeLinkAtCoords followed by one copy into \p U.
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
-loadGaugeLinkAtCoords(const Complex<Real> *gaugePtr, int64_t soa_stride,
+loadGaugeLinkAtCoords(const Complex<Real> *gauge_ptr, int64_t soa_stride,
                       const GaugeHaloDevice<Real> *halo, const int x[NDIMS],
                       int dir, const LatticeParams &p,
-                      MatrixSun<Real, NCOLORS> &U,
+                      MatrixSun<Real, NCOLORS> &u,
                       ArrayType atype = ArrayType::SOA) {
   loadGaugeLinkRef(
-      resolveGaugeLinkAtCoords(gaugePtr, soa_stride, halo, x, dir, p, atype),
-      false, U);
+      resolveGaugeLinkAtCoords(gauge_ptr, soa_stride, halo, x, dir, p, atype),
+      false, u);
 }
 
 } // namespace kwqft

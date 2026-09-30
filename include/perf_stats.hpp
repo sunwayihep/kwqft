@@ -28,7 +28,7 @@ struct PerfReport {
  * Serial / single-rank: local values only.
  * MPI (nproc > 1): sum flop and bytes over ranks, use max(time) as wall clock.
  */
-inline PerfReport make_perf_report(long long local_flop, long long local_bytes,
+inline PerfReport makePerfReport(long long local_flop, long long local_bytes,
                                    double local_time, bool mpi_domain,
                                    int nproc) {
   long long flop = local_flop;
@@ -76,7 +76,7 @@ inline PerfReport make_perf_report(long long local_flop, long long local_bytes,
  * complex addition is 2. The product has N^3 multiplications and N^2(N-1)
  * additions. A dagger only conjugates an operand and is not counted here.
  */
-inline long long sun_product_flops() {
+inline long long sunProductFlops() {
   const long long n = NCOLORS;
   return 6 * n * n * n + 2 * n * n * (n - 1);
 }
@@ -86,8 +86,8 @@ inline long long sun_product_flops() {
  *
  * 2(D-1) legs, two SU(N) products per leg.
  */
-inline long long staple_flops_per_link() {
-  return 4LL * static_cast<long long>(NDIMS - 1) * sun_product_flops();
+inline long long stapleFlopsPerLink() {
+  return 4LL * static_cast<long long>(NDIMS - 1) * sunProductFlops();
 }
 
 /**
@@ -101,7 +101,7 @@ inline long long staple_flops_per_link() {
  * is 4 complex multiplications and 2 complex additions per column.
  * SU(2) and SU(3) follow the specialized kernels, which do not form U*Sigma.
  */
-inline long long heatbath_algebra_flops() {
+inline long long heatbathAlgebraFlops() {
   const long long n = NCOLORS;
   if (n == 2) {
     return 46;
@@ -111,7 +111,7 @@ inline long long heatbath_algebra_flops() {
     return 3 * (60 * n + 38);
   }
   const long long nsub = n * (n - 1) / 2;
-  return sun_product_flops() + nsub * (56 * n + 46);
+  return sunProductFlops() + nsub * (56 * n + 46);
 }
 
 /**
@@ -121,13 +121,13 @@ inline long long heatbath_algebra_flops() {
  * U*Sigma once and reflects each subgroup by two embeddings of U and of
  * U*Sigma.
  */
-inline long long overrelax_algebra_flops() {
+inline long long overrelaxAlgebraFlops() {
   const long long n = NCOLORS;
   if (n == 3) {
     return 3 * (88 * n + 12);
   }
   const long long nsub = n * (n - 1) / 2;
-  return sun_product_flops() + nsub * (112 * n + 20);
+  return sunProductFlops() + nsub * (112 * n + 20);
 }
 
 /**
@@ -136,7 +136,7 @@ inline long long overrelax_algebra_flops() {
  * The staple reads 6(D-1) neighboring links; the updated link is loaded
  * and stored. This is 20 at D=4.
  */
-inline long long staple_links_per_update() {
+inline long long stapleLinksPerUpdate() {
   return 6LL * static_cast<long long>(NDIMS - 1) + 2LL;
 }
 

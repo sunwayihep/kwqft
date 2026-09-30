@@ -27,7 +27,7 @@
 
 using namespace kwqft;
 
-void print_usage(const char *prog_name) {
+void printUsage(const char *prog_name) {
   printf("Usage:\n");
   printf("  %s -latt L0 ... L_{n-1} -beta B -ntraj N [options]\n", prog_name);
   printf("  Options (any order):\n");
@@ -59,16 +59,16 @@ void print_usage(const char *prog_name) {
 namespace {
 
 /// SU(3) single-process uses SOA12; MPI / other Nc use full SOA.
-ArrayType default_gauge_array_type() {
+ArrayType defaultGaugeArrayType() {
 #if NCOLORS == 3
-  if (mpi_comm_size() == 1) {
+  if (mpiCommSize() == 1) {
     return ArrayType::SOA12;
   }
 #endif
   return ArrayType::SOA;
 }
 
-bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
+bool parseHeatbathCli(int argc, char **argv, int proc_grid[NDIMS],
                         std::vector<int> &lattice_size, double &beta,
                         int &ntraj, double &xi0, int &nhb, int &novr,
                         int &nsave, std::string &err) {
@@ -226,19 +226,19 @@ bool parse_heatbath_cli(int argc, char **argv, int proc_grid[NDIMS],
 } // namespace
 
 template <typename Real>
-void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
+void runHeatbath(int ntraj, int nhb, int novr, int nsave) {
   auto &params = PARAMS::params;
-  const ArrayType array_type = default_gauge_array_type();
+  const ArrayType array_type = defaultGaugeArrayType();
 
   GaugeArray<Real> gauge(array_type, MemoryLocation::Device,
                          params.volume * NDIMS, true);
-  if (mpi_comm_rank() == 0) {
+  if (mpiCommRank() == 0) {
     gauge.details();
   }
 
-  unsigned int seed = 1234u + static_cast<unsigned int>(mpi_comm_rank());
+  unsigned int seed = 1234u + static_cast<unsigned int>(mpiCommRank());
   RandomGenerator rng(seed, params.half_volume);
-  if (mpi_comm_rank() == 0) {
+  if (mpiCommRank() == 0) {
     printf("RNG initialized with seed %u\n", seed);
     printf("Initializing gauge field (cold start)...\n");
   }
@@ -252,7 +252,7 @@ void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
 
   plaquette.run();
   polyakov.run();
-  if (mpi_comm_rank() == 0) {
+  if (mpiCommRank() == 0) {
     printf("Initial configuration:\n");
     plaquette.printValue();
     polyakov.printValue();
@@ -261,7 +261,7 @@ void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
 
   int num_warmup = 0;
   std::ostringstream prefix_stream;
-  prefix_stream << "su" << NCOLORS << "_nd" << NDIMS << "_beta" << params.beta;
+  prefix_stream << "su" << NCOLORS << "_nd" << NDIMS << "beta" << params.beta;
   for (int i = 0; i < NDIMS; ++i) {
     prefix_stream << "_L" << params.global_grid[i];
   }
@@ -271,7 +271,7 @@ void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
   total_timer.start();
 
   for (int traj = 1; traj <= ntraj; ++traj) {
-    if (mpi_comm_rank() == 0) {
+    if (mpiCommRank() == 0) {
       printf("========== Trajectory %d ==========\n", traj);
     }
     Timer traj_timer;
@@ -295,7 +295,7 @@ void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
 
     plaquette.printValue();
     polyakov.printValue();
-    if (mpi_comm_rank() == 0) {
+    if (mpiCommRank() == 0) {
       printf("\nPerformance statistics (last sweep of each update type):\n");
     }
     if (nhb > 0) {
@@ -307,7 +307,7 @@ void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
     reunitarize.stat();
     plaquette.stat();
     polyakov.stat();
-    if (mpi_comm_rank() == 0) {
+    if (mpiCommRank() == 0) {
       printf("Trajectory time: %.4f s\n\n", traj_timer.elapsed());
     }
 
@@ -316,12 +316,12 @@ void run_heatbath(int ntraj, int nhb, int novr, int nsave) {
           save_prefix + "_cfg_" + std::to_string(traj) + ".bin";
       // File format is always full SU(N) matrices (SOA12 reconstructed on
       // save).
-      save_gauge_binary<double, double>(gauge, filename, false);
+      saveGaugeBinary<double, double>(gauge, filename, false);
     }
   }
 
   total_timer.stop();
-  if (mpi_comm_rank() == 0) {
+  if (mpiCommRank() == 0) {
     printf("====================================\n");
     printf("Total simulation time: %.4f s\n", total_timer.elapsed());
     printf("====================================\n");
@@ -334,7 +334,7 @@ int main(int argc, char *argv[]) {
   for (int k = 1; k < argc; ++k) {
     if (std::strcmp(argv[k], "-h") == 0 ||
         std::strcmp(argv[k], "--help") == 0) {
-      print_usage(argv[0]);
+      printUsage(argv[0]);
       kwqft::finalize();
       return 0;
     }
@@ -349,11 +349,11 @@ int main(int argc, char *argv[]) {
   int novr = 4;
   int nsave = 100;
   std::string cli_err;
-  if (!parse_heatbath_cli(argc, argv, proc_grid, lattice_size, beta, ntraj, xi0,
+  if (!parseHeatbathCli(argc, argv, proc_grid, lattice_size, beta, ntraj, xi0,
                           nhb, novr, nsave, cli_err)) {
-    if (mpi_comm_rank() == 0) {
+    if (mpiCommRank() == 0) {
       fprintf(stderr, "Error: %s\n", cli_err.c_str());
-      print_usage(argv[0]);
+      printUsage(argv[0]);
     }
     kwqft::finalize();
     return 1;
@@ -380,8 +380,8 @@ int main(int argc, char *argv[]) {
   for (int d = 0; d < NDIMS; ++d) {
     global_lattice[d] = lattice_size[d];
   }
-  if (mpi_comm_size() > 1) {
-    mpi_setup_cartesian(proc_grid, global_lattice);
+  if (mpiCommSize() > 1) {
+    mpiSetupCartesian(proc_grid, global_lattice);
     std::vector<int> pg(proc_grid, proc_grid + NDIMS);
     initializeParamsDistributed(lattice_size, pg, beta, true, xi0);
   } else {
@@ -391,7 +391,7 @@ int main(int argc, char *argv[]) {
   initializeParams(lattice_size, beta, true, xi0);
 #endif
 
-  if (mpi_comm_rank() == 0) {
+  if (mpiCommRank() == 0) {
     printf("Starting SU(%d) heatbath simulation\n", NCOLORS);
     printf("Beta: %f\n", beta);
     printf("Number of trajectories: %d\n", ntraj);
@@ -402,7 +402,7 @@ int main(int argc, char *argv[]) {
     printf("\n");
   }
 
-  run_heatbath<double>(ntraj, nhb, novr, nsave);
+  runHeatbath<double>(ntraj, nhb, novr, nsave);
 
   kwqft::finalize();
   return 0;

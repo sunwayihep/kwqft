@@ -187,7 +187,7 @@ public:
 
   // Static factory methods
   KOKKOS_INLINE_FUNCTION
-  static Complex make_complex(Real re, Real im) { return Complex(re, im); }
+  static Complex makeComplex(Real re, Real im) { return Complex(re, im); }
 
   KOKKOS_INLINE_FUNCTION
   static Complex zero() { return Complex(Real(0), Real(0)); }
@@ -199,7 +199,7 @@ public:
   static Complex unit() { return Complex(Real(1), Real(0)); }
 
   KOKKOS_INLINE_FUNCTION
-  static Complex I() { return Complex(Real(0), Real(1)); }
+  static Complex i() { return Complex(Real(0), Real(1)); }
 
   // Print (only works on host)
   void print() const {
@@ -285,11 +285,8 @@ KOKKOS_INLINE_FUNCTION Complex<Real> cos(const Complex<Real> &z) {
 }
 
 // Type aliases
-using complexs = Complex<float>;
-using complexd = Complex<double>;
-
-// Template alias for generic use
-template <typename Real> using complex = Complex<Real>;
+using Complexs = Complex<float>;
+using Complexd = Complex<double>;
 
 } // namespace kwqft
 

@@ -17,7 +17,7 @@
 namespace kwqft {
 
 /// Number of complex elements stored per link for \p atype.
-KOKKOS_INLINE_FUNCTION constexpr int gauge_complex_elems(ArrayType atype) {
+KOKKOS_INLINE_FUNCTION constexpr int gaugeComplexElems(ArrayType atype) {
   switch (atype) {
   case ArrayType::SOA12:
     return 6;
@@ -30,8 +30,8 @@ KOKKOS_INLINE_FUNCTION constexpr int gauge_complex_elems(ArrayType atype) {
 }
 
 /// Real parameters per link (for bandwidth accounting).
-KOKKOS_INLINE_FUNCTION constexpr int gauge_num_params(ArrayType atype) {
-  return 2 * gauge_complex_elems(atype);
+KOKKOS_INLINE_FUNCTION constexpr int gaugeNumParams(ArrayType atype) {
+  return 2 * gaugeComplexElems(atype);
 }
 
 /**
@@ -39,10 +39,10 @@ KOKKOS_INLINE_FUNCTION constexpr int gauge_num_params(ArrayType atype) {
  *
  */
 template <typename Real>
-KOKKOS_INLINE_FUNCTION void reconstruct12p(MatrixSun<Real, 3> &A) {
-  A.e[2][0] = ~(A.e[0][1] * A.e[1][2] - A.e[0][2] * A.e[1][1]);
-  A.e[2][1] = ~(A.e[0][2] * A.e[1][0] - A.e[0][0] * A.e[1][2]);
-  A.e[2][2] = ~(A.e[0][0] * A.e[1][1] - A.e[0][1] * A.e[1][0]);
+KOKKOS_INLINE_FUNCTION void reconstruct12p(MatrixSun<Real, 3> &a) {
+  a.e[2][0] = ~(a.e[0][1] * a.e[1][2] - a.e[0][2] * a.e[1][1]);
+  a.e[2][1] = ~(a.e[0][2] * a.e[1][0] - a.e[0][0] * a.e[1][2]);
+  a.e[2][2] = ~(a.e[0][0] * a.e[1][1] - a.e[0][1] * a.e[1][0]);
 }
 
 /**
@@ -59,21 +59,21 @@ KOKKOS_INLINE_FUNCTION void reconstruct12p(MatrixSun<Real, 3> &A) {
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void loadMatrixStrided(const Complex<Real> *ptr,
                                               int64_t stride, bool adjoint,
-                                              MatrixSun<Real, NCOLORS> &U) {
+                                              MatrixSun<Real, NCOLORS> &u) {
   if (ptr == nullptr) {
-    U = MatrixSun<Real, NCOLORS>::zero();
+    u = MatrixSun<Real, NCOLORS>::zero();
     return;
   }
   if (adjoint) {
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
-        U.e[j][i] = ~ptr[(j + i * NCOLORS) * stride];
+        u.e[j][i] = ~ptr[(j + i * NCOLORS) * stride];
       }
     }
   } else {
     for (int i = 0; i < NCOLORS; ++i) {
       for (int j = 0; j < NCOLORS; ++j) {
-        U.e[i][j] = ptr[(j + i * NCOLORS) * stride];
+        u.e[i][j] = ptr[(j + i * NCOLORS) * stride];
       }
     }
   }
@@ -90,24 +90,24 @@ KOKKOS_INLINE_FUNCTION void loadMatrixStrided(const Complex<Real> *ptr,
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
 loadGaugeMatrix(const Complex<Real> *ptr, int64_t link_base, int64_t soa_stride,
-                ArrayType atype, MatrixSun<Real, NCOLORS> &U,
+                ArrayType atype, MatrixSun<Real, NCOLORS> &u,
                 bool adjoint = false) {
   if constexpr (NCOLORS == 3) {
     if (atype == ArrayType::SOA12) {
       for (int i = 0; i < 2; ++i) {
         for (int j = 0; j < 3; ++j) {
-          U.e[i][j] = ptr[link_base + (j + i * 3) * soa_stride];
+          u.e[i][j] = ptr[link_base + (j + i * 3) * soa_stride];
         }
       }
-      reconstruct12p(U);
+      reconstruct12p(u);
       if (adjoint) {
-        U = U.dagger();
+        u = u.dagger();
       }
       return;
     }
   }
   (void)atype;
-  loadMatrixStrided(ptr + link_base, soa_stride, adjoint, U);
+  loadMatrixStrided(ptr + link_base, soa_stride, adjoint, u);
 }
 
 /**
@@ -116,12 +116,12 @@ loadGaugeMatrix(const Complex<Real> *ptr, int64_t link_base, int64_t soa_stride,
 template <typename Real>
 KOKKOS_INLINE_FUNCTION void
 storeGaugeMatrix(Complex<Real> *ptr, int64_t link_base, int64_t soa_stride,
-                 ArrayType atype, const MatrixSun<Real, NCOLORS> &U) {
+                 ArrayType atype, const MatrixSun<Real, NCOLORS> &u) {
   if constexpr (NCOLORS == 3) {
     if (atype == ArrayType::SOA12) {
       for (int i = 0; i < 2; ++i) {
         for (int j = 0; j < 3; ++j) {
-          ptr[link_base + (j + i * 3) * soa_stride] = U.e[i][j];
+          ptr[link_base + (j + i * 3) * soa_stride] = u.e[i][j];
         }
       }
       return;
@@ -130,7 +130,7 @@ storeGaugeMatrix(Complex<Real> *ptr, int64_t link_base, int64_t soa_stride,
   (void)atype;
   for (int i = 0; i < NCOLORS; ++i) {
     for (int j = 0; j < NCOLORS; ++j) {
-      ptr[link_base + (j + i * NCOLORS) * soa_stride] = U.e[i][j];
+      ptr[link_base + (j + i * NCOLORS) * soa_stride] = u.e[i][j];
     }
   }
 }

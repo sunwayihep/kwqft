@@ -35,11 +35,12 @@ KOKKOS_INLINE_FUNCTION void indexNdNm(int64_t id, int x[ND],
  * @brief Convert 1D index to N-dimensional coordinates with custom grid
  */
 template <int ND = NDIMS>
-KOKKOS_INLINE_FUNCTION void indexNdNm(int64_t id, int x[ND], const int X[ND]) {
+KOKKOS_INLINE_FUNCTION void indexNdNm(int64_t id, int x[ND],
+                                      const int grid[ND]) {
   int64_t temp = id;
   for (int i = 0; i < ND; ++i) {
-    x[i] = static_cast<int>(temp % X[i]);
-    temp /= X[i];
+    x[i] = static_cast<int>(temp % grid[i]);
+    temp /= grid[i];
   }
 }
 
@@ -63,12 +64,12 @@ KOKKOS_INLINE_FUNCTION int64_t indexNdNm(const int x[ND],
  * @brief Convert N-dimensional coordinates to 1D index with custom grid
  */
 template <int ND = NDIMS>
-KOKKOS_INLINE_FUNCTION int64_t indexNdNm(const int x[ND], const int X[ND]) {
+KOKKOS_INLINE_FUNCTION int64_t indexNdNm(const int x[ND], const int grid[ND]) {
   int64_t index = 0;
   int64_t factor = 1;
   for (int i = 0; i < ND; ++i) {
     index += x[i] * factor;
-    factor *= X[i];
+    factor *= grid[i];
   }
   return index;
 }
@@ -131,11 +132,11 @@ KOKKOS_INLINE_FUNCTION void indexNdEo(int x[ND], int64_t id, int oddbit,
  */
 template <int ND = NDIMS>
 KOKKOS_INLINE_FUNCTION void indexNdEo(int x[ND], int64_t id, int oddbit,
-                                      const int X[ND]) {
-  int64_t factor = id / (X[0] / 2);
+                                      const int grid[ND]) {
+  int64_t factor = id / (grid[0] / 2);
   for (int i = 1; i < ND; ++i) {
-    int64_t factor1 = factor / X[i];
-    x[i] = static_cast<int>(factor - factor1 * X[i]);
+    int64_t factor1 = factor / grid[i];
+    x[i] = static_cast<int>(factor - factor1 * grid[i]);
     factor = factor1;
   }
   int sum = 0;
@@ -143,13 +144,13 @@ KOKKOS_INLINE_FUNCTION void indexNdEo(int x[ND], int64_t id, int oddbit,
     sum += x[i];
   }
   int xodd = (sum + oddbit) & 1;
-  x[0] = static_cast<int>((id * 2 + xodd) - id / (X[0] / 2) * X[0]);
+  x[0] = static_cast<int>((id * 2 + xodd) - id / (grid[0] / 2) * grid[0]);
 }
 
 /// Convert site coordinates to even/odd linear index (inverse of \ref
 /// indexNdEo).
 template <int ND = NDIMS>
-KOKKOS_INLINE_FUNCTION int64_t coords_to_eo_idx(const int x[ND],
+KOKKOS_INLINE_FUNCTION int64_t coordsToEoIdx(const int x[ND],
                                                 const LatticeParams &p) {
   int64_t pos = 0;
   int64_t factor = 1;
@@ -158,11 +159,11 @@ KOKKOS_INLINE_FUNCTION int64_t coords_to_eo_idx(const int x[ND],
     factor *= static_cast<int64_t>(p.grid[i]);
   }
   pos /= 2;
-  int sumX = 0;
+  int sum_x = 0;
   for (int i = 0; i < ND; ++i) {
-    sumX += x[i];
+    sum_x += x[i];
   }
-  const int oddbit1 = sumX & 1;
+  const int oddbit1 = sum_x & 1;
   pos += static_cast<int64_t>(oddbit1) * p.half_volume;
   return pos;
 }

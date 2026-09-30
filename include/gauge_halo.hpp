@@ -12,7 +12,7 @@
  * message.
  *
  * Validity tracking: the halo remembers which (dir, parity) blocks are up to
- * date. Kernels that modify links call \ref mark_dirty (checkerboard update)
+ * date. Kernels that modify links call \ref markDirty (checkerboard update)
  * or \ref invalidate (whole field); consumers call \ref refresh, which only
  * exchanges stale blocks (no-op if everything is valid). One halo object is
  * shared per \c GaugeArray, so HeatBath / Overrelaxation / Plaquette never
@@ -44,7 +44,7 @@ namespace kwqft {
 
 /// True when MPI is handed DefaultMemSpace pointers directly (device-aware
 /// MPI or host-accessible default memory); false = stage through pinned host.
-constexpr bool kwqft_mpi_uses_device_buffers() {
+constexpr bool kwqftMpiUsesDeviceBuffers() {
 #if defined(KWQFT_MPI_DEVICE_AWARE)
   return true;
 #else
@@ -73,9 +73,9 @@ public:
   void invalidate();
 
   /// Mark links of direction \p dir on parity \p parity stale.
-  void mark_dirty(int dir, int parity);
+  void markDirty(int dir, int parity);
 
-  bool all_valid() const;
+  bool allValid() const;
 
   //--- exchange --------------------------------------------------------------
 
@@ -89,24 +89,24 @@ public:
    * read until \ref end_exchange.  If \p dir < 0 no block is marked, only the
    * currently stale ones are sent.
    */
-  void begin_exchange(const ComplexT *gauge_soa, int64_t soa_stride,
+  void beginExchange(const ComplexT *gauge_soa, int64_t soa_stride,
                       int dir = -1, int parity = -1);
 
-  /// Complete an exchange started by \ref begin_exchange (no-op otherwise).
-  void end_exchange();
+  /// Complete an exchange started by \ref beginExchange (no-op otherwise).
+  void endExchange();
 
-  bool in_flight() const { return in_flight_; }
+  bool inFlight() const { return in_flight; }
 
   //--- site lists for compute/communication overlap ---------------------------
 
   /// Half-volume ids (parity \p parity) of sites on some exchanged face.
-  const SiteList &boundary_sites(int parity);
+  const SiteList &boundarySites(int parity);
   /// Half-volume ids (parity \p parity) whose staple never reads a ghost.
-  const SiteList &interior_sites(int parity);
+  const SiteList &interiorSites(int parity);
 
   //--- device access ---------------------------------------------------------
 
-  GaugeHaloDevice<Real> device_view() const;
+  GaugeHaloDevice<Real> deviceView() const;
 
   /**
    * @brief Apply a per-matrix functor \c f(MatrixSun&) to every ghost link.
@@ -114,14 +114,14 @@ public:
    * Used to keep ghosts valid through deterministic link-wise operations
    * (e.g. reunitarization) without a new exchange.
    */
-  template <class F> void apply_to_ghosts(F f) {
-    end_exchange();
+  template <class F> void applyToGhosts(F f) {
+    endExchange();
     const int64_t me = static_cast<int64_t>(NCOLORS * NCOLORS);
-    for (int code = 0; code < HALO_CODE_COUNT; ++code) {
-      if (!active_[code]) {
+    for (int code = 0; code < halo_code_count; ++code) {
+      if (!active[code]) {
         continue;
       }
-      auto buf = d_recv_[code];
+      auto buf = d_recv[code];
       const int64_t nmat = static_cast<int64_t>(buf.extent(0)) / me;
       Kokkos::parallel_for(
           "halo_apply_to_ghosts",
@@ -145,11 +145,11 @@ public:
     Kokkos::fence();
   }
 
-  const LatticeParams &params() const { return p_; }
+  const LatticeParams &params() const { return p; }
 
 private:
-  static constexpr bool mpi_default_mem() {
-    return kwqft_mpi_uses_device_buffers();
+  static constexpr bool mpiDefaultMem() {
+    return kwqftMpiUsesDeviceBuffers();
   }
 
   /// Contiguous element range of one region buffer to exchange.
@@ -163,35 +163,35 @@ private:
 public:
   // Implementation helpers (public only because nvcc requires the enclosing
   // function of an extended lambda to be publicly accessible).
-  void pack_stale(const ComplexT *gauge_soa, int64_t soa_stride);
+  void packStale(const ComplexT *gauge_soa, int64_t soa_stride);
 
 private:
-  void build_site_lists();
-  void collect_stale_chunks(std::vector<Chunk> &chunks) const;
-  void post_chunks(const std::vector<Chunk> &chunks);
+  void buildSiteLists();
+  void collectStaleChunks(std::vector<Chunk> &chunks) const;
+  void postChunks(const std::vector<Chunk> &chunks);
 
-  LatticeParams p_{};
-  int64_t mat_elems_{0};
-  std::vector<int64_t> halo_vol_;
-  std::vector<int> split_dim_;
-  std::vector<char> active_;
-  std::vector<DeviceView> d_recv_;
-  std::vector<DeviceView> d_send_;
-  std::vector<StageView> h_send_;
-  std::vector<StageView> h_recv_;
+  LatticeParams p{};
+  int64_t mat_elems{0};
+  std::vector<int64_t> halo_vol;
+  std::vector<int> split_dim;
+  std::vector<char> active;
+  std::vector<DeviceView> d_recv;
+  std::vector<DeviceView> d_send;
+  std::vector<StageView> h_send;
+  std::vector<StageView> h_recv;
 
-  /// valid_[dir * 2 + parity]
-  std::vector<char> valid_;
+  /// valid[dir * 2 + parity]
+  std::vector<char> valid;
 
-  bool in_flight_{false};
-  std::vector<Chunk> flight_chunks_;
+  bool in_flight{false};
+  std::vector<Chunk> flight_chunks;
 #ifdef KWQFT_USE_MPI
-  std::vector<MPI_Request> flight_reqs_;
+  std::vector<MPI_Request> flight_reqs;
 #endif
 
-  bool site_lists_built_{false};
-  SiteList boundary_[2];
-  SiteList interior_[2];
+  bool site_lists_built{false};
+  SiteList boundary[2];
+  SiteList interior[2];
 };
 
 } // namespace kwqft
