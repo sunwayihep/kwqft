@@ -1,6 +1,6 @@
 # KWQFT - **K**okkos **K**en **W**ilson **Q**uantum **F**ield **T**heory
 
-KWQFT is a lattice gauge theory library based on the Kokkos programming model, inspired by the CUDA version [sunw](https://github.com/sunwayihep/sunw.git). Using the Kokkos programming model allows the same source code to run efficiently on both CPUs and GPUs without modification.
+KWQFT is a lattice gauge theory library based on the Kokkos programming model, inspired by the CUDA version [sunw](https://github.com/sunwayihep/sunw.git). Using the Kokkos programming model allows the same source code to run efficiently on both CPUs and GPUs without modification. The design and performance are described in [arXiv:2610.09766](https://arxiv.org/abs/2610.09766), see [Citation](#citation) if you use this code.
 
 ## Features
 
@@ -243,7 +243,24 @@ This code achieves performance portability using the Kokkos programming model:
 3. **Atomic Operations**: Uses `Kokkos::atomic_*` functions
 4. **Random Number Generation**: Uses `Kokkos::Random_XorShift64_Pool`
 
+## Citation
+
+If you use KWQFT, please cite:
+
+```bibtex
+@article{Sun:2026sms,
+    author = "Sun, Wei",
+    title = "{Performance Portable $\mathrm{SU}(N)$ Lattice Gauge Theory Simulation with Kokkos}",
+    eprint = "2610.09766",
+    archivePrefix = "arXiv",
+    primaryClass = "hep-lat",
+    month = "10",
+    year = "2026"
+}
+```
+
 ## References
 
+- W. Sun, *Performance Portable SU(N) Lattice Gauge Theory Simulation with Kokkos*, [arXiv:2610.09766](https://arxiv.org/abs/2610.09766)
 - [Kokkos Documentation](https://kokkos.org/kokkos-core-wiki/)
 - [Kokkos Tutorials](https://github.com/kokkos/kokkos-tutorials)
