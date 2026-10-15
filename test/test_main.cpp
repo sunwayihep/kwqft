@@ -342,8 +342,8 @@ template <typename Real> bool testGaugeIoRoundtrip() {
   const Real plaq_before = plaq.value();
 
   const std::string filename = "test_io_roundtrip.bin";
-  saveGaugeBinary<Real, Real>(gauge, filename, false);
-  loadGaugeBinary<Real, Real>(gauge, filename, false);
+  saveGaugeBinary<Real, Real>(gauge, filename);
+  loadGaugeBinary<Real, Real>(gauge, filename);
 
   plaq.run();
   const Real plaq_after = plaq.value();
@@ -707,8 +707,8 @@ template <typename Real> bool testMpiGaugeIoRoundtrip() {
   const Real plaq_before = plaq.value();
 
   const std::string filename = "test_mpi_io_roundtrip.bin";
-  saveGaugeBinary<Real, Real>(gauge, filename, false);
-  loadGaugeBinary<Real, Real>(gauge, filename, false);
+  saveGaugeBinary<Real, Real>(gauge, filename);
+  loadGaugeBinary<Real, Real>(gauge, filename);
 
   plaq.run();
   const Real plaq_after = plaq.value();

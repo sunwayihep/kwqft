@@ -321,7 +321,7 @@ void runHeatbath(int ntraj, int nhb, int novr, int nsave) {
           save_prefix + "_cfg_" + std::to_string(traj) + ".bin";
       // File format is always full SU(N) matrices (SOA12 reconstructed on
       // save).
-      saveGaugeBinary<Real, Real>(gauge, filename, false);
+      saveGaugeBinary<Real, Real>(gauge, filename);
     }
   }
 

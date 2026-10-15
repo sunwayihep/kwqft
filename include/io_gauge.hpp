@@ -16,25 +16,24 @@ namespace kwqft {
  *
  * Writes full SU(N) matrices per link (Nc×Nc complex) in normal site order.
  * If the in-memory gauge uses SOA12, the third row is reconstructed before
- * writing. Serial: local lattice; MPI: rank 0 assembles the global lattice.
+ * writing. Serial: local lattice; MPI: collective MPI-IO — every rank writes
+ * its own sub-block through a subarray file view.
  *
  * @tparam Real         In-memory gauge precision
  * @tparam RealSaveConf On-disk precision
- * @param withheader    If true, prepend grid, beta, and precision metadata
  */
 template <typename Real, typename RealSaveConf>
 void saveGaugeBinary(const GaugeArray<Real> &gauge,
-                       const std::string &filename, bool withheader = false);
+                       const std::string &filename);
 
 /**
  * @brief Load gauge configuration from CULQCD/sunw binary layout.
  *
- * Inverse of \ref save_gauge_binary. MPI: rank 0 reads and distributes to
- * ranks.
+ * Inverse of \ref saveGaugeBinary. MPI: collective MPI-IO — every rank reads
+ * its own sub-block directly (no rank-0 distribution).
  */
 template <typename Real, typename RealSaveConf>
-void loadGaugeBinary(GaugeArray<Real> &gauge, const std::string &filename,
-                       bool withheader = false);
+void loadGaugeBinary(GaugeArray<Real> &gauge, const std::string &filename);
 
 } // namespace kwqft
 
