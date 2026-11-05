@@ -135,7 +135,9 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 
 ```bash
 # Format: ./heatbath -latt L0 ... L{NDIMS-1} -beta beta -ntraj ntraj
-#          [-nhb nhb] [-novr novr] [-nsave nsave] [-xi0 xi0] [-geom p0 ... p{NDIMS-1}]
+#          [-nhb nhb] [-novr novr] [-nsave nsave] [-xi0 xi0]
+#          [-seed seed] [-start file] [-traj-offset offset] [-warmup warmup]
+#          [-geom p0 ... p{NDIMS-1}]
 ./heatbath -latt 8 8 8 16 -beta 6.0 -ntraj 1000
 ./heatbath -latt 8 8 8 16 -beta 6.0 -ntraj 1000 -nhb 1 -novr 4 -nsave 100
 ./heatbath -beta 6.0 -ntraj 1000 -latt 8 8 8 16 -xi0 2.0
@@ -144,11 +146,15 @@ cmake .. -DKWQFT_NCOLORS=4 -DKWQFT_NDIMS=4  # SU(4) in 4D
 Parameter description:
 - `-latt`: Global lattice dimensions (`NDIMS` integers, e.g. x, y, z, t in 4D)
 - `-beta`: Gauge coupling constant
-- `-ntraj`: Number of trajectories
+- `-ntraj`: Number of trajectories in this run
 - `-nhb`: Pseudo-heatbath sweeps per trajectory (optional, default `1`, must be `> 0`)
 - `-novr`: Overrelaxation sweeps per trajectory (optional, default `4`, may be `0`)
-- `-nsave`: Save gauge configuration every `N` trajectories (optional, default `100`, must be `> 0`)
+- `-nsave`: Write a configuration when the global trajectory number is divisible by `N` (optional, default `100`, must be `> 0`)
 - `-xi0`: Bare anisotropy (optional, default `1.0`)
+- `-seed`: RNG seed (optional, default `1234`, must be `>= 0`). Rank `r` uses `seed + r`
+- `-start`: Full SU(N) configuration to restart from (optional). Without it, the run starts from a cold configuration
+- `-traj-offset`: Added to this run's trajectory index to form the global trajectory number (optional, default `0`, must be `>= 0`)
+- `-warmup`: Write a configuration only when the global trajectory number is greater than `N` (optional, default `0`, must be `>= 0`). The final checkpoint is still written
 
 One trajectory consists of `nhb` pseudo-heatbath sweeps followed by `novr`
 overrelaxation sweeps, then reunitarization and measurements.
@@ -156,6 +162,25 @@ overrelaxation sweeps, then reunitarization and measurements.
 When `xi0 != 1`, the code uses anisotropic Wilson plaquette weights:
 - spatial-spatial plaquettes: `beta / xi0`
 - spatial-temporal plaquettes: `beta * xi0`
+
+The global trajectory number is `-traj-offset` plus the index of this run
+(the index starts at 1). A configuration file
+
+`su<Nc>_nd<Nd>beta<beta>_L<L0>_..._cfg_<global>.bin`
+
+is written when `global > warmup` and `global` is divisible by `-nsave`.
+After the last trajectory, a checkpoint is always written to the same prefix
+with `_checkpoint_<global>.bin`.
+
+Continue a finished run from its checkpoint:
+
+```bash
+./heatbath -latt 8 8 8 16 -beta 6.0 -ntraj 200 -nsave 100 \
+  -start su3_nd4beta6_L8_L8_L8_L16_checkpoint_300.bin -traj-offset 300
+```
+
+This evolves 200 trajectories labeled 301 through 500, saves `cfg_400` and
+`cfg_500`, and writes `checkpoint_500`.
 
 ### MPI Support (`-geom`)
 
@@ -173,7 +198,8 @@ MPI run format:
 
 ```bash
 # mpirun -np P ./heatbath -geom p0 ... p{NDIMS-1} -latt L0 ... L{NDIMS-1} \
-#   -beta beta -ntraj ntraj [-nhb nhb] [-novr novr] [-nsave nsave] [-xi0 xi0]
+#   -beta beta -ntraj ntraj [-nhb nhb] [-novr novr] [-nsave nsave] [-xi0 xi0] \
+#   [-seed seed] [-start file] [-traj-offset offset] [-warmup warmup]
 ```
 
 Rules:
